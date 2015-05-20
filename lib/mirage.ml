@@ -48,6 +48,7 @@ type mode = [
   | `Unix
   | `Xen
   | `MacOSX
+  | `Rumprun
 ]
 
 let string_of_mode =
@@ -55,6 +56,7 @@ let string_of_mode =
   | `Unix -> "Unix"
   | `Xen -> "Xen"
   | `MacOSX -> "MacOS X"
+  | `Rumprun -> "Rumprun"
 
 let mode : mode ref = ref `Unix
 
@@ -324,7 +326,7 @@ module Io_page = struct
   let libraries () =
     match !mode with
     | `Xen  -> ["io-page"]
-    | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
+    | `Unix | `MacOSX | `Rumprun -> ["io-page"; "io-page.unix"]
 
   let configure () = ()
 
@@ -388,6 +390,7 @@ module Clock = struct
     match !mode with
     | `Unix | `MacOSX -> "mirage-clock-unix"
     | `Xen  -> "mirage-clock-xen"
+    | `Rumprun -> "mirage-clock-unix-rumprun"
   ]
 
   let libraries () = packages ()
@@ -452,17 +455,18 @@ module Console = struct
 
   let construction () =
     match !mode with
-    | `Unix | `MacOSX -> "Console_unix"
+    | `Unix | `MacOSX | `Rumprun -> "Console_unix"
     | `Xen  -> "Console_xen"
 
   let packages _ =
     match !mode with
     | `Unix | `MacOSX -> ["mirage-console"; "mirage-unix"]
     | `Xen  -> ["mirage-console"; "xenstore"; "mirage-xen"; "xen-gnt"; "xen-evtchn"]
+    | `Rumprun -> ["mirage-console-rumprun"; "mirage-unix-rumprun"]
 
   let libraries _ =
     match !mode with
-    | `Unix | `MacOSX -> ["mirage-console.unix"]
+    | `Unix | `MacOSX | `Rumprun -> ["mirage-console.unix"]
     | `Xen -> ["mirage-console.xen"]
 
   let configure t =
@@ -1916,7 +1920,8 @@ let add_to_opam_packages p =
 let packages t =
   let m = match !mode with
     | `Unix | `MacOSX -> "mirage-unix"
-    | `Xen  -> "mirage-xen" in
+    | `Xen  -> "mirage-xen"
+    | `Rumprun -> "mirage-unix-rumprun" in
   let ps = StringSet.add m !ps in
   let ps = match t.tracing with
     | None -> ps
@@ -1935,7 +1940,7 @@ let add_to_ocamlfind_libraries l =
 
 let libraries t =
   let m = match !mode with
-    | `Unix | `MacOSX -> "mirage-types.lwt"
+    | `Unix | `MacOSX | `Rumprun -> "mirage-types.lwt"
     | `Xen  -> "mirage-types.lwt" in
   let ls = StringSet.add m !ls in
   let ls = match t.tracing with
@@ -2153,7 +2158,7 @@ let configure_makefile t =
       append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
       append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append oc "XENLIB = $(shell ocamlfind query mirage-xen)\n"
-    | `Unix ->
+    | `Unix  ->
       append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
       append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
       append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg\n"
@@ -2161,6 +2166,11 @@ let configure_makefile t =
       append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal,thread\"\n";
       append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
       append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg\n"
+    | `Rumprun ->
+      append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
+      append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
+      append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg\n";
+      append oc "export OCAMLFIND_TOOLCHAIN=rumprun\n"
   end;
   append oc "BUILD  = ocamlbuild -use-ocamlfind $(LIBS) $(SYNTAX) $(FLAGS)\n\
              OPAM   = opam\n\n\
@@ -2215,7 +2225,7 @@ let configure_makefile t =
                  \t  $(shell gcc -print-libgcc-file-name) \\\n\
                  %s"
         extra_c_archives pkg_config_deps generate_image;
-    | `Unix | `MacOSX ->
+    | `Unix | `MacOSX | `Rumprun ->
       append oc "build: main.native";
       append oc "\tln -nfs _build/main.native mir-%s" t.name;
   end;

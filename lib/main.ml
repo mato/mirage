@@ -49,8 +49,8 @@ let no_depext =
   mk_flag ["no-depext"] "Skip installation of external dependencies."
 
 let target =
-  let doc = "Target platform to compile the unikernel for.  Valid values are: $(i,xen), $(i,unix), $(i,macosx).  There are short forms available via $(b,--xen) and $(b,--unix) as well." in
-  let e = Arg.enum [ "unix", `Unix; "macosx", `MacOSX; "xen", `Xen ] in
+  let doc = "Target platform to compile the unikernel for.  Valid values are: $(i,xen), $(i,unix), $(i,macosx), $(i,rumprun).  There are short forms available via $(b,--xen) and $(b,--unix) as well." in
+  let e = Arg.enum [ "unix", `Unix; "macosx", `MacOSX; "xen", `Xen; "rumprun", `Rumprun ] in
   Arg.(value & opt (some e) None & info ["t";"target"] ~docv:"TARGET" ~doc)
 
 (* Select the operating mode from command line flags *)

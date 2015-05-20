@@ -381,6 +381,7 @@ type mode = [
   | `Unix
   | `Xen
   | `MacOSX
+  | `Rumprun
 ]
 (** Configuration mode. *)
 
