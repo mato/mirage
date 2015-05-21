@@ -601,12 +601,14 @@ module Block = struct
     match !mode with
     | `Unix | `MacOSX -> "mirage-block-unix"
     | `Xen  -> "mirage-block-xen"
+    | `Rumprun -> "mirage-block-unix-rumprun"
   ]
 
   let libraries _ = [
     match !mode with
     | `Unix | `MacOSX -> "mirage-block-unix"
     | `Xen  -> "mirage-block-xen.front"
+    | `Rumprun -> "mirage-block-unix"
   ]
 
   let configure t =
