@@ -1854,8 +1854,9 @@ module Nocrypto_entropy = struct
 
   let libraries libs =
     remembering linkage_ @@ fun () ->
+      let toolchain = if !mode = `Rumprun then "rumprun" else "" in
       let needed =
-        OCamlfind.query ~recursive:true (SS.elements libs)
+        OCamlfind.query ~toolchain:toolchain ~recursive:true (SS.elements libs)
           |> List.exists ((=) "nocrypto") in
       match !mode with
       | `Xen              when needed -> SS.singleton "nocrypto.xen"
