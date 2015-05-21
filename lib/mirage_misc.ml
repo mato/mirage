@@ -340,15 +340,16 @@ let dedup l =
 
 module OCamlfind = struct
 
-  let query ?predicates ?(format="%p") ?(recursive=false) xs =
+  let query ?predicates ?(format="%p") ?(toolchain="") ?(recursive=false) xs =
     let pred = match predicates with
       | None    -> ""
       | Some ps -> "-predicates '" ^ String.concat "," ps ^ "'"
+    and tc   = if toolchain <> "" then "-toolchain '" ^ toolchain ^ "'" else ""
     and fmt  = "-format '" ^ format ^ "'"
     and r    = if recursive then "-recursive" else ""
     and pkgs = String.concat " " xs
     in
-    let out = read_command "ocamlfind query %s %s %s %s" fmt pred r pkgs in
+    let out = read_command "ocamlfind %s query %s %s %s %s" tc fmt pred r pkgs in
     split out '\n'
 
   let installed lib =
