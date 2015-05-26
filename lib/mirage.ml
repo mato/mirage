@@ -1421,7 +1421,9 @@ module STACKV4_socket = struct
     String.capitalize (name t)
 
   let packages t =
-    "tcpip" :: Impl.packages t.console
+    match !mode with
+    | `Unix | `MacOSX | `Xen -> "tcpip" :: Impl.packages t.console
+    | `Rumprun -> "tcpip-rumprun" :: Impl.packages t.console
 
   let libraries t =
     "tcpip.stack-socket" :: Impl.libraries t.console
