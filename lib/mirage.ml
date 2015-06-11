@@ -1519,14 +1519,20 @@ module Conduit = struct
   let module_name t = String.capitalize (name t)
 
   let packages t =
-    "mirage-conduit" :: (
+    ( match !mode with
+      | `Rumprun -> "mirage-conduit-rumprun"
+      | _ -> "mirage-conduit" )
+    :: (
       match t.stackv4 with
       | None   -> []
       | Some s -> Impl.packages s
     ) @ (
       match t.tls with
       | false -> []
-      | true  -> ["tls"]
+      | true  -> (
+        match !mode with
+        | `Rumprun -> ["tls-rumprun"]
+        | _ -> ["tls"] )
     )
 
   let libraries t =
@@ -1603,6 +1609,7 @@ module Resolver_unix = struct
   let packages t =
     match !mode with
     |`Unix | `MacOSX -> [ "mirage-conduit" ]
+    |`Rumprun -> ["mirage-conduit-rumprun" ]
     |`Xen -> failwith "Resolver_unix not supported on Xen"
 
   let libraries t =
@@ -1705,8 +1712,11 @@ module HTTP = struct
   let module_name t =
     String.capitalize (name t)
 
-  let packages { conduit }=
-    [ "mirage-http" ] @
+  let packages { conduit }= (
+    match !mode with
+    | `Rumprun -> ["mirage-http-rumprun"]
+    | _ -> ["mirage-http"]
+  ) @
     Impl.packages conduit
 
   let libraries { conduit } =
