@@ -796,6 +796,7 @@ module Network = struct
     | `Unix -> ["mirage-net-unix"]
     | `MacOSX -> ["mirage-net-macosx"]
     | `Xen  -> ["mirage-net-xen"]
+    | `Rumprun -> failwith "Direct networking not yet supported on rumprun, use socket"
 
   let libraries t =
     packages t
