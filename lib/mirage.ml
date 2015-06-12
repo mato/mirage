@@ -393,7 +393,11 @@ module Clock = struct
     | `Rumprun -> "mirage-clock-unix-rumprun"
   ]
 
-  let libraries () = packages ()
+  let libraries () = [
+    match !mode with
+    | `Unix | `MacOSX | `Rumprun -> "mirage-clock-unix"
+    | `Xen  -> "mirage-clock-xen"
+  ]
 
   let configure () =
     append_main "let clock () = return (`Ok ())";
