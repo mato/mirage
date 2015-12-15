@@ -430,10 +430,171 @@ val app_info: info impl
 
 (** {2 Deprecated functions} *)
 
-val get_mode: unit -> [ `Unix | `Xen | `MacOSX ]
-(** Current configuration mode.
-    @deprecated Use {!Key.target} and {!Key.is_xen}.
-*)
+type t = {
+  name: string;
+  root: string;
+  jobs: job impl list;
+  tracing: tracing option;
+}
+(** Type for values representing a project description. *)
+
+val load: string option -> t
+(** Read a config file. If no name is given, search for use
+    [config.ml]. *)
+
+(** {2 Device configuration} *)
+
+type mode = [
+  | `Unix
+  | `Xen
+  | `Solo5
+  | `MacOSX
+]
+(** Configuration mode. *)
+
+val set_mode: mode -> unit
+(** Set the configuration mode for the current project. *)
+
+val get_mode: unit -> mode
+
+module Impl: sig
+
+  (** Configurable device. *)
+
+  val name: 'a impl -> string
+  (** The unique variable name of the value of type [t]. *)
+
+  val module_name: 'a impl -> string
+  (** The unique module name for the given implementation. *)
+
+  val packages: 'a impl -> string list
+  (** List of OPAM packages to install for this device. *)
+
+  val libraries: 'a impl -> string list
+  (** List of ocamlfind libraries. *)
+
+  val configure: 'a impl -> unit
+  (** Generate some code to create a value with the right
+      configuration settings. *)
+
+  val clean: 'a impl -> unit
+  (** Remove all the autogen files. *)
+
+end
+
+(** {2 Project configuration} *)
+
+val manage_opam_packages: bool -> unit
+(** Tell Irminsule to manage the OPAM configuration
+    (ie. install/remove missing packages). *)
+
+val no_opam_version_check: bool -> unit
+(** Bypass the check of opam's version. *)
+
+val no_depext: bool -> unit
+(** Skip installation of external dependencies. *)
+
+val add_to_opam_packages: string list -> unit
+(** Add some base OPAM package to install *)
+
+val add_to_ocamlfind_libraries: string list -> unit
+(** Link with the provided additional libraries. *)
+
+val packages: t -> string list
+(** List of OPAM packages to install for this project. *)
+
+val libraries: t -> string list
+(** List of ocamlfind libraries. *)
+
+val configure: t -> unit
+(** Generate some code to create a value with the right
+    configuration settings. *)
+
+val clean: t -> unit
+(** Remove all the autogen files. *)
+
+val build: t -> unit
+(** Call [make build] in the right directory. *)
+
+(** {2 Extensions} *)
+
+module type CONFIGURABLE = sig
+
+  (** Signature for configurable devices. *)
+
+  type t
+  (** Abstract type for configurable devices. *)
+
+  val name: t -> string
+  (** Return the unique variable name holding the state of the given
+      device. *)
+
+  val module_name: t -> string
+  (** Return the name of the module implementing the given device. *)
+
+  val packages: t -> string list
+  (** Return the list of OPAM packages which needs to be installed to
+      use the given device. *)
+
+  val libraries: t -> string list
+  (** Return the list of ocamlfind libraries to link with the
+      application to use the given device. *)
+
+  val configure: t -> unit
+  (** Configure the given device. *)
+
+  val clean: t -> unit
+  (** Clean all the files generated to use the given device. *)
+
+  val update_path: t -> string -> t
+  (** [update_path t root] prefixes all the path appearing in [t] with
+      the the prefix [root]. *)
+
+end
+
+val implementation: 'a -> 'b -> (module CONFIGURABLE with type t = 'b) -> 'a impl
+(** Extend the library with an external configuration. *)
+
+val append_main: ('a, unit, string, unit) format4 -> 'a
+(** Add some string to [main.ml]. *)
+
+val newline_main: unit -> unit
+(** Add a newline to [main.ml]. *)
+
+module Io_page: CONFIGURABLE
+(** Implementation of IO page allocators. *)
+
+module Clock: CONFIGURABLE
+(** Implementation of clocks. *)
+
+module Time: CONFIGURABLE
+(** Implementation of timers. *)
+
+module Random: CONFIGURABLE
+(** Implementation of timers. *)
+
+module Console: CONFIGURABLE
+(** Implementation of consoles. *)
+
+module Crunch: CONFIGURABLE
+(** Implementation of crunch a local filesystem. *)
+
+module Direct_kv_ro: CONFIGURABLE
+(** Implementation of direct access to the filesystem as a key/value
+    read-only store. *)
+
+module Block: CONFIGURABLE
+(** Implementation of raw block device. *)
+
+module Fat: CONFIGURABLE
+(** Implementation of the Fat filesystem. *)
+
+module Network: CONFIGURABLE
+(** Implementation of network configuration. *)
+
+module Ethif: CONFIGURABLE
+
+module Arpv4: CONFIGURABLE
 
 val add_to_opam_packages : string list -> unit
 (** Register opam packages.
