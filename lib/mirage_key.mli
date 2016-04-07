@@ -27,12 +27,12 @@ include Functoria.KEY with module Arg := Arg
 
 (** {2 Mirage keys} *)
 
-val target: [ `Unix | `Xen | `MacOSX ] key
+val target: [ `Unix | `Xen | `MacOSX | `Solo5 ] key
 (** [-t TARGET]: Key setting the configuration mode for the current project.
     Is either ["xen"], ["unix"] or ["macosx"].
 *)
 
-val pp_target: [ `Unix | `Xen | `MacOSX ] Fmt.t
+val pp_target: [ `Unix | `Xen | `MacOSX | `Solo5 ] Fmt.t
 (** Pretty printer for the mode. *)
 
 val is_xen: bool value
@@ -44,6 +44,9 @@ val unix: bool key
 val xen: bool key
 (** [--xen]. Set {!target} to [`Xen]. *)
 
+val solo5: bool key
+(** [--solo5]. Set {!target} to [`Solo5]. *)
+	
 val no_ocaml_check: bool key
 (** [--no-ocaml-check]. Do not check the version of the compiler. *)
 

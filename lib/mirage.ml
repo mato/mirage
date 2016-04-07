@@ -482,8 +482,24 @@ let console_xen str = impl @@ object
       Printf.sprintf "%s.connect %S" modname str
   end
 
+let console_solo5 str = impl @@ object
+    inherit base_configurable
+    method ty = console
+    val name = Name.ocamlify @@ "console_solo5_" ^ str
+    method name = name
+    method module_name = "Console_solo5"
+    method packages = Key.pure
+        ["mirage-console"; "mirage-solo5";]
+    method libraries = Key.pure ["mirage-console.solo5"]
+    method connect _ modname _args =
+      Printf.sprintf "%s.connect %S" modname str
+  end
+
 let custom_console str =
-  if_impl Key.is_xen (console_xen str) (console_unix str)
+  match_impl Key.(value target) [
+  `Xen, console_xen str ;
+  `Solo5,  console_solo5 str ;
+] ~default:(console_unix str)
 
 let default_console = custom_console "0"
 
@@ -523,60 +539,10 @@ module Direct_kv_ro = struct
 end
 
 let direct_kv_ro dirname =
-  impl kv_ro dirname (module Direct_kv_ro)
-
-module Block = struct
-
-  type t = {
-    filename: string;
-    number: int;
-  }
-
-  let name t =
-    Name.of_key ("block" ^ t.filename) ~base:"block"
-
-  let module_name _ =
-    "Block"
-
-  let connect_name t =
-    match !mode with
-    | `Unix | `MacOSX | `Solo5 -> t.filename (* open the file directly *)
-    | `Xen ->
-      (* We need the xenstore id *)
-      (* Taken from https://github.com/mirage/mirage-block-xen/blob/a64d152586c7ebc1d23c5adaa4ddd440b45a3a83/lib/device_number.ml#L64 *)
-      (if t.number < 16
-       then (202 lsl 8) lor (t.number lsl 4)
-       else (1 lsl 28)  lor (t.number lsl 8)) |> string_of_int
-
-  let packages _ = [
-    match !mode with
-    | `Unix | `MacOSX -> "mirage-block-unix"
-    | `Solo5 -> "mirage-block-solo5"
-    | `Xen -> "mirage-block-xen"
-  ]
-
-  let libraries _ = [
-    match !mode with
-    | `Unix | `MacOSX -> "mirage-block-unix"
-    | `Solo5 -> "mirage-block-solo5"
-    | `Xen -> "mirage-block-xen.front"
-  ]
-
-  let configure t =
-    append_main "let %s () =" (name t);
-    append_main "  %s.connect %S" (module_name t) (connect_name t);
-    newline_main ()
-
-  let clean t =
-    ()
-
-  let update_path t root =
-    if Sys.file_exists (root / t.filename) then
-      { t with filename = root / t.filename }
-    else
-      t
-
-end
+  match_impl Key.(value target) [
+  `Xen, crunch dirname ;
+  `Solo5,  crunch dirname ;
+] ~default:(direct_kv_ro_conf dirname)
 
 type block = BLOCK
 let block = Type BLOCK
@@ -1614,16 +1580,21 @@ module Job = struct
   let update_path t root =
     { t with impl = Impl.update_path t.impl root }
 
-end
+let argv_solo5 = impl @@ object
+    inherit base_configurable
+    method ty = Functoria_app.argv
+    method name = "argv_solo5"
+    method module_name = "Bootvar"
+    method packages = Key.pure [ "mirage-bootvar-solo5" ]
+    method libraries = Key.pure [ "mirage-bootvar" ]
+    method connect _ _ _ = "Bootvar.argv ()"
+  end
 
-module Tracing = struct
-  type t = {
-    size : int;
-  }
-
-  let unix_trace_file = "trace.ctf"
-
-  let packages _ = StringSet.singleton "mirage-profile"
+let argv_dynamic =
+  match_impl Key.(value target) [
+  `Xen, argv_xen ;
+  `Solo5, argv_solo5 ;
+] ~default:(argv_unix)
 
   let libraries _ =
     match !mode with
@@ -2075,19 +2046,30 @@ let configure_makefile ~target ~root ~name ~warn_error info =
   let libraries =
     match libs with
     | [] -> ""
-    | ls -> "-pkgs " ^ String.concat "," ls in
-  let packages = String.concat " " (packages t) in
-  let oc = open_out file in
-  append oc "# %s" generated_by_mirage;
-  newline oc;
-  append oc "LIBS   = %s" libraries_str;
-  append oc "PKGS   = %s" packages;
-  begin match !mode with
-    | `Xen | `Solo5 ->
-      append oc "SYNTAX = -tags \"syntax(camlp4o),annot,bin_annot,strict_sequence,principal\"\n";
-      append oc "SYNTAX += -tag-line \"<static*.*>: -syntax(camlp4o)\"\n";
-      append oc "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
-      append oc "XENLIB = $(shell ocamlfind query mirage-xen)\n"
+    | l -> Fmt.(strf "-pkgs %a" (list ~sep:(unit ",") string)) l
+  in
+  let packages =
+    Fmt.(strf "%a" (list ~sep:(unit " ") string)) @@ Info.packages info
+  in
+  Cmd.with_file file @@ fun fmt ->
+  append fmt "# %s" (generated_header ());
+  newline fmt;
+  append fmt "LIBS   = %s" libraries;
+  append fmt "PKGS   = %s" packages;
+  let default_tags =
+    (if warn_error then "warn_error(+1..49)," else "") ^
+    "warn(A-4-41-44),debug,bin_annot,\
+     strict_sequence,principal,safe_string"
+  in
+  begin match target with
+    | `Xen ->
+      append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
+      append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
+      append fmt "XENLIB = $(shell ocamlfind query mirage-xen)\n"
+    | `Solo5 ->
+      append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
+      append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
+      append fmt "XENLIB = $(shell ocamlfind query mirage-solo5)\n"
     | `Unix ->
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
       append fmt "FLAGS  = -r -cflag -g -lflags -g,-linkpkg\n"
@@ -2133,17 +2115,29 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       Printf.sprintf "\t  -o mir-%s.xen" name
     ) in
 
-  begin match !mode with
-    | `Xen | `Solo5 ->
-      let filter = function
-        | "unix" | "bigarray" |"shared_memory_ring_stubs" -> false    (* Provided by mirage-xen instead. *)
-        | _ -> true in
-      let extra_c_archives =
-        get_extra_ld_flags ~filter pkgs
-        |> String.concat " \\\n\t  " in
-
-      append oc "build:: main.native.o";
+  begin match target with
+    | `Xen ->
+      get_extra_ld_flags libs
+      >>| String.concat ~sep:" \\\n\t  "
+      >>= fun extra_c_archives ->
+      append fmt "build:: main.native.o";
       let pkg_config_deps = "mirage-xen" in
+      append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
+      append fmt "\tld -d -static -nostdlib \\\n\
+                  \t  _build/main.native.o \\\n\
+                  \t  %s \\\n\
+                  \t  $$(pkg-config --static --libs %s) \\\n\
+                  \t  $(shell gcc -print-libgcc-file-name) \\\n\
+                  %s"
+        extra_c_archives pkg_config_deps generate_image ;
+      append fmt "\t@@echo Build succeeded";
+      R.ok ()
+    | `Solo5 ->
+      get_extra_ld_flags libs
+      >>| String.concat ~sep:" \\\n\t  "
+      >>= fun extra_c_archives ->
+      append fmt "build:: main.native.o";
+      let pkg_config_deps = "mirage-solo5" in
       append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
       append fmt "\tld -d -static -nostdlib \\\n\
                   \t  _build/main.native.o \\\n\
@@ -2253,11 +2247,17 @@ module Project = struct
 
       method packages =
         let l = [ "lwt"; "mirage-types"; "mirage-types-lwt" ] in
-        Key.(if_ is_xen) ("mirage-xen" :: l) ("mirage-unix" :: l)
+		Key.match_ Key.(value target) @@function
+		  | `Xen -> "mirage-xen" :: l
+		  | `Solo5 -> "mirage-solo5" :: l
+		  | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method libraries =
         let l = [ "mirage.runtime"; "mirage-types.lwt" ] in
-        Key.(if_ is_xen) ("mirage-xen" :: l) ("mirage-unix" :: l)
+		Key.match_ Key.(value target) @@function
+		  | `Xen -> "mirage-xen" :: l
+		  | `Solo5 -> "mirage-solo5" :: l
+		  | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method configure = configure
       method clean = clean
