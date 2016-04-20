@@ -2139,13 +2139,19 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "build:: main.native.o";
       let pkg_config_deps = "mirage-solo5" in
       append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
-      append fmt "\tld -d -static -nostdlib \\\n\
-                  \t  _build/main.native.o \\\n\
-                  \t  %s \\\n\
-                  \t  $$(pkg-config --static --libs %s) \\\n\
-                  \t  $(shell gcc -print-libgcc-file-name) \\\n\
-                  %s"
-        extra_c_archives pkg_config_deps generate_image ;
+      append fmt "\tld -T $$(pkg-config --variable=linkscript solo5-kernel-ukvm)\\\n\
+	    \t  -O2 -nostdlib -z max-page-size=0x1000 -static \\\n\
+	    \t -o %s \\\n\
+        \t  $$(pkg-config --static --libs solo5-kernel-ukvm)\\\n\
+        \t  _build/main.native.o \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-ocaml/libxenotherlibs.a \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-ocaml/libxenasmrun.a \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-posix/libxenposix.a \\\n\
+        \t  $$(pkg-config --static --libs mirage-solo5) \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/libopenlibm.a \\\n\
+        \t  %s \\\n\
+        \t  $$(pkg-config --static --libs %s)"
+        (Printf.sprintf "mir-%s.solo5-ukvm" name) extra_c_archives pkg_config_deps;
       append fmt "\t@@echo Build succeeded";
       R.ok ()
     | `Unix | `MacOSX ->
