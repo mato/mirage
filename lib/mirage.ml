@@ -1998,6 +1998,27 @@ let get_extra_ld_flags pkgs =
         Printf.sprintf "-L%s %s" dir ldflags :: acc
     ) []
 
+(* Get the linker flags for any extra C objects we depend on.
+ * This is needed when building a Xen image as we do the link manually. *)
+let get_extra_ld_flags_solo5 pkgs =
+  Cmd.read "opam config var lib" >>= fun s ->
+  let lib = String.trim s in
+  Cmd.read
+    "ocamlfind query -r -format '%%d\t%%(xen_linkopts)' -predicates native %s"
+    (String.concat ~sep:" " pkgs) >>| fun output ->
+  String.cuts output ~sep:"\n"
+  |> List.fold_left (fun acc line ->
+      match String.cut line ~sep:"\t" with
+      | None -> acc
+      | Some (dir, ldflags) ->
+        let ldflags = String.cuts ldflags ~sep:" " in
+        let ldflags = List.map (expand_name ~lib) ldflags in
+        let ldflags = String.concat ~sep:" " ldflags in
+        let ldflags = Str.global_replace (Str.regexp "tcpip_xen_stubs") "tcpip_stubs" ldflags in
+        Printf.sprintf "-L%s %s" dir ldflags :: acc
+    ) []
+
+      
 let configure_myocamlbuild_ml ~root =
   let minor, major = Cmd.ocaml_version () in
   if minor < 4 || major < 1 then (
@@ -2133,7 +2154,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "\t@@echo Build succeeded";
       R.ok ()
     | `Solo5 ->
-      get_extra_ld_flags libs
+      get_extra_ld_flags_solo5 libs
       >>| String.concat ~sep:" \\\n\t  "
       >>= fun extra_c_archives ->
       append fmt "build:: main.native.o";
