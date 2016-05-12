@@ -430,7 +430,7 @@ val app_info: info impl
 
 (** {2 Deprecated functions} *)
 
-val get_mode: unit -> [ `Unix | `Xen | `MacOSX | `Solo5 ]
+val get_mode: unit -> [ `Unix | `Xen | `MacOSX | `QEMU | `Ukvm ]
 (** Current configuration mode.
     @deprecated Use {!Key.target} and {!Key.is_xen}.
 *)

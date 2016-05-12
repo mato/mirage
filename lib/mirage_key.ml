@@ -65,7 +65,8 @@ let pp_group =
 type mode = [
   | `Unix
   | `Xen
-  | `Solo5
+  | `QEMU
+  | `Ukvm
   | `MacOSX
 ]
 
@@ -74,7 +75,8 @@ let target_conv: mode Cmdliner.Arg.converter =
     "unix"  , `Unix;
     "macosx", `MacOSX;
     "xen"   , `Xen;
-	"solo5" , `Solo5;
+    "qemu" , `QEMU;
+  	"ukvm" , `Ukvm;
   ]
 
 let pp_target fmt m = snd target_conv fmt m
@@ -102,12 +104,13 @@ let default_unix = lazy (
 let target =
   let doc =
     "Target platform to compile the unikernel for. Valid values are: \
-     $(i,xen), $(i,unix), $(i,macosx), $(i,solo5)."
+     $(i,xen), $(i,unix), $(i,macosx), $(i,qemu), $(i,ukvm)."
   in
   let serialize ppf = function
     | `Unix   -> Fmt.pf ppf "`Unix"
     | `Xen    -> Fmt.pf ppf "`Xen"
-	| `Solo5  -> Fmt.pf ppf "`Solo5"
+	| `QEMU  -> Fmt.pf ppf "`QEMU"
+	| `Ukvm  -> Fmt.pf ppf "`Ukvm"          
     | `MacOSX -> Fmt.pf ppf "`MacOSX"
   in
   let conv = Arg.conv ~conv:target_conv ~runtime_conv:"target" ~serialize in
@@ -121,7 +124,7 @@ let target =
 let is_xen =
   Key.match_ Key.(value target) @@ function
   | `Xen -> true
-  | `Unix | `MacOSX |`Solo5 -> false
+  | `Unix | `MacOSX | `QEMU | `Ukvm -> false
 
 let unix =
   let doc =
@@ -143,14 +146,22 @@ let xen =
   let alias = Alias.add target setter alias in
   Key.alias "xen" alias
 
-let solo5 =
-  let doc = "Set $(b,target) to $(i,solo5)." in
-  let doc = Arg.info ~docs:mirage_section ~docv:"BOOL" ~doc ["solo5"] in
-  let setter b = if b then Some `Solo5 else None in
+let qemu =
+  let doc = "Set $(b,target) to $(i,qemu)." in
+  let doc = Arg.info ~docs:mirage_section ~docv:"BOOL" ~doc ["qemu"] in
+  let setter b = if b then Some `QEMU else None in
   let alias = Alias.flag doc in
   let alias = Alias.add target setter alias in
-  Key.alias "solo5" alias
-	
+  Key.alias "qemu" alias
+
+let ukvm =
+  let doc = "Set $(b,target) to $(i,ukvm)." in
+  let doc = Arg.info ~docs:mirage_section ~docv:"BOOL" ~doc ["ukvm"] in
+  let setter b = if b then Some `Ukvm else None in
+  let alias = Alias.flag doc in
+  let alias = Alias.add target setter alias in
+  Key.alias "ukvm" alias
+
 let no_ocaml_check =
   let doc = "Bypass the OCaml compiler version checks." in
   let doc =

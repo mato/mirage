@@ -346,7 +346,10 @@ let io_page_conf = object
   method ty = io_page
   method name = "io_page"
   method module_name = "Io_page"
-  method libraries = Key.(if_ is_xen) ["io-page"; "io-page.unix"] ["io-page"]
+  method libraries =
+	Key.match_ Key.(value target) @@function
+	  | `Xen | `QEMU | `Ukvm -> ["io-page"]
+	  | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
   method packages = Key.pure [ "io-page" ]
 end
 
@@ -398,7 +401,10 @@ let clock_conf = object (self)
   method ty = clock
   method name = "clock"
   method module_name = "Clock"
-  method libraries = Key.(if_ is_xen) ["mirage-clock-xen"] ["mirage-clock-unix"]
+  method libraries =
+	Key.match_ Key.(value target) @@function
+	  | `Xen | `QEMU | `Ukvm -> ["mirage-clock-xen"]
+	  | `Unix | `MacOSX -> ["mirage-clock-unix"]
   method packages = self#libraries
 end
 
@@ -498,7 +504,8 @@ let console_solo5 str = impl @@ object
 let custom_console str =
   match_impl Key.(value target) [
   `Xen, console_xen str ;
-  `Solo5,  console_solo5 str ;
+  `QEMU,  console_solo5 str ;
+  `Ukvm,  console_solo5 str ;
 ] ~default:(console_unix str)
 
 let default_console = custom_console "0"
@@ -541,7 +548,8 @@ end
 let direct_kv_ro dirname =
   match_impl Key.(value target) [
   `Xen, crunch dirname ;
-  `Solo5,  crunch dirname ;
+  `QEMU,  crunch dirname ;
+  `Ukvm,  crunch dirname ;
 ] ~default:(direct_kv_ro_conf dirname)
 
 type block = BLOCK
@@ -573,13 +581,20 @@ class block_conf file =
     method ty = block
     method name = name
     method module_name = "Block"
-    method packages = Key.(if_ is_xen) ["mirage-block-xen"] ["mirage-block-unix"]
+    method packages =
+	  Key.match_ Key.(value target) @@function
+		| `Xen -> ["mirage-block-xen"]
+		| `QEMU | `Ukvm -> ["mirage-block-solo5"]
+		| `Unix | `MacOSX -> ["mirage-block-unix"]
     method libraries =
-      Key.(if_ is_xen) ["mirage-block-xen.front"] ["mirage-block-unix"]
+	  Key.match_ Key.(value target) @@function
+		| `Xen -> ["mirage-block-xen.front"]
+		| `QEMU | `Ukvm -> ["mirage-block-solo5"]
+		| `Unix | `MacOSX -> ["mirage-block-unix"]
 
     method private connect_name target root =
       match target with
-      | `Unix | `MacOSX -> root / b.filename (* open the file directly *)
+      | `Unix | `MacOSX | `QEMU | `Ukvm -> root / b.filename (* open the file directly *)
       | `Xen ->
         (* We need the xenstore id *)
         (* Taken from https://github.com/mirage/mirage-block-xen/blob/
@@ -771,9 +786,10 @@ let network_conf (intf : string Key.key) =
 
     method packages =
       Key.match_ Key.(value target) @@ function
-      | `Unix   -> ["mirage-net-unix"]
-      | `MacOSX -> ["mirage-net-macosx"]
-      | `Xen    -> ["mirage-net-xen"]
+      | `Unix         -> ["mirage-net-unix"]
+      | `MacOSX       -> ["mirage-net-macosx"]
+      | `Xen          -> ["mirage-net-xen"]
+      | `QEMU | `Ukvm -> ["mirage-net-solo5"]
 
     method libraries = self#packages
 
@@ -1162,35 +1178,20 @@ end
 
 module TCPV4_socket = struct
 
-  type t = Ipaddr.V4.t option
-
-  let name _ = "tcpv4_socket"
-
-  let module_name _ = "Tcpv4_socket"
-
-  let packages t = [ "tcpip" ]
-
-  let libraries t =
-    match !mode with
-    | `Unix | `MacOSX -> [ "tcpip.tcpv4-socket" ]
-    | `Xen | `Solo5 -> failwith "No socket implementation available for Xen"
-
-  let configure t =
-    append_main "let %s () =" (name t);
-    let ip = match t with
-      | None    -> "None"
-      | Some ip ->
-        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)" (Ipaddr.V4.to_string ip)
-    in
-    append_main "  %s.connect %S" (module_name t) ip;
-    newline_main ()
-
-  let clean t =
-    ()
-
-  let update_path t root =
-    t
-
+let udpv4_socket_conf ipv4_key = object
+  inherit base_configurable
+  method ty = udpv4
+  val name = Name.create "udpv4_socket" ~prefix:"udpv4_socket"
+  method name = name
+  method module_name = "Udpv4_socket"
+  method keys = [ Key.abstract ipv4_key ]
+  method packages = Key.pure [ "tcpip" ]
+  method libraries =
+    Key.match_ Key.(value target) @@ function
+    | `Unix | `MacOSX -> [ "tcpip.udpv4-socket" ]
+    | `Xen | `QEMU | `Ukvm -> failwith "No socket implementation available for Xen"
+  method connect _ modname _ =
+    Format.asprintf "%s.connect %a" modname  pp_key ipv4_key
 end
 
 let socket_udpv4 ?group ip = impl (udpv4_socket_conf @@ Key.V4.socket ?group ip)
@@ -1235,7 +1236,7 @@ let tcpv4_socket_conf ipv4_key = object
   method libraries =
     Key.match_ Key.(value target) @@ function
     | `Unix | `MacOSX -> [ "tcpip.tcpv4-socket" ]
-    | `Xen  -> failwith "No socket implementation available for Xen"
+    | `Xen | `QEMU | `Ukvm -> failwith "No socket implementation available for Xen"
   method connect _ modname _ =
     Format.asprintf "%s.connect %a" modname  pp_key ipv4_key
 end
@@ -1405,20 +1406,20 @@ let nocrypto = impl @@ object
     method module_name = "Nocrypto_entropy"
 
     method packages =
-      Key.(if_ is_xen)
-        [ "nocrypto" ; "mirage-entropy-xen" ; "zarith-xen" ]
-        [ "nocrypto" ]
+      Key.match_ Key.(value target) @@function
+        | `Xen | `QEMU | `Ukvm -> [ "nocrypto" ; "mirage-entropy-xen" ; "zarith-xen" ]
+		| `Unix | `MacOSX -> [ "nocrypto" ]
 
     method libraries =
-      Key.(if_ is_xen)
-        ["nocrypto.xen"]
-        ["nocrypto.lwt"]
+      Key.match_ Key.(value target) @@function
+        | `Xen | `QEMU | `Ukvm -> ["nocrypto.xen"]
+		| `Unix | `MacOSX -> ["nocrypto.lwt"]
 
     method configure _ = R.ok (enable_entropy ())
     method connect i _ _ =
-      let s = if Key.(eval (Info.context i) is_xen)
-        then "Nocrypto_entropy_xen.initialize ()"
-        else "Nocrypto_entropy_lwt.initialize ()"
+	  let s = match Key.(get (Info.context i) target) with
+	  | `Xen | `QEMU | `Ukvm -> "Nocrypto_entropy_xen.initialize ()"
+	  | `Unix | `MacOSX -> "Nocrypto_entropy_lwt.initialize ()"
       in
       Fmt.strf "%s >|= fun x -> `Ok x" s
 
@@ -1506,7 +1507,7 @@ let resolver_unix_system = impl @@ object
     method packages =
       Key.match_ Key.(value target) @@ function
       | `Unix | `MacOSX -> [ "mirage-conduit" ]
-      | `Xen -> failwith "Resolver_unix not supported on Xen"
+      | `Xen | `QEMU | `Ukvm -> failwith "Resolver_unix not supported on Xen"
     method libraries = Key.pure [ "conduit.mirage"; "conduit.lwt-unix" ]
     method connect _ _modname _ = "return (`Ok Resolver_lwt_unix.system)"
   end
@@ -1592,8 +1593,15 @@ let argv_solo5 = impl @@ object
 
 let argv_dynamic =
   match_impl Key.(value target) [
+  `Xen, argv_xen ;  
+  `QEMU, argv_solo5 ;
+  `Ukvm, argv_solo5 ;
+] ~default:(argv_unix)
+
+let default_argv = match_impl Key.(value target) [
   `Xen, argv_xen ;
-  `Solo5, argv_solo5 ;
+  `QEMU, argv_solo5 ;
+  `Ukvm, argv_solo5 ;
 ] ~default:(argv_unix)
 
   let libraries _ =
@@ -1686,16 +1694,44 @@ module Nocrypto_entropy = struct
     | _                         -> "return_unit"
 end
 
-type t = {
-  name: string;
-  root: string;
-  jobs: job impl list;
-  tracing: tracing option;
-}
+let mprof_trace ~size () =
+  let unix_trace_file = "trace.ctf" in
+  let key = Key.tracing_size size in
+  impl @@ object
+    inherit base_configurable
+    method ty = job
+    method name = "mprof_trace"
+    method module_name = "MProf"
+    method keys = [ Key.abstract key ]
+    method packages = Key.pure ["mirage-profile"]
+    method libraries =
+	  Key.match_ Key.(value target) @@function
+		| `Xen | `QEMU | `Ukvm -> ["mirage-profile.xen"]
+		| `Unix | `MacOSX -> ["mirage-profile.unix"]
 
 let t = ref None
 
-let config_file = ref None
+    method connect i _ _ = match Key.(get (Info.context i) target) with
+      | `Unix | `MacOSX ->
+        Fmt.strf
+          "return (`Ok ()))@.\
+           let () = (@ \
+             @[<v 2>  let buffer = MProf_unix.mmap_buffer ~size:%a %S in@ \
+             let trace_config = MProf.Trace.Control.make buffer MProf_unix.timestamper in@ \
+             MProf.Trace.Control.start trace_config@]"
+          Key.serialize_call (Key.abstract key)
+          unix_trace_file;
+      | `Xen | `QEMU | `Ukvm ->
+        Fmt.strf
+          "return (`Ok ()))@.\
+           let () = (@ \
+             @[<v 2>  let trace_pages = MProf_xen.make_shared_buffer ~size:%a in@ \
+             let buffer = trace_pages |> Io_page.to_cstruct |> Cstruct.to_bigarray in@ \
+             let trace_config = MProf.Trace.Control.make buffer MProf_xen.timestamper in@ \
+             MProf.Trace.Control.start trace_config;@ \
+             MProf_xen.share_with (module Gnt.Gntshr) (module OS.Xs) ~domid:0 trace_pages@ \
+             |> OS.Main.run@]"
+          Key.serialize_call (Key.abstract key)
 
 let reset () =
   config_file := None;
@@ -2087,7 +2123,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
       append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append fmt "XENLIB = $(shell ocamlfind query mirage-xen)\n"
-    | `Solo5 ->
+    | `QEMU | `Ukvm ->
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
       append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append fmt "XENLIB = $(shell ocamlfind query mirage-solo5)\n"
@@ -2153,7 +2189,34 @@ let configure_makefile ~target ~root ~name ~warn_error info =
         extra_c_archives pkg_config_deps generate_image ;
       append fmt "\t@@echo Build succeeded";
       R.ok ()
-    | `Solo5 ->
+    | `QEMU ->
+      get_extra_ld_flags_solo5 libs
+      >>| String.concat ~sep:" \\\n\t  "
+      >>= fun extra_c_archives ->
+      append fmt "build:: main.native.o";
+      let pkg_config_deps = "mirage-solo5" in
+      append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
+      append fmt "\tmkdir -p /tmp/iso/boot/grub";
+      append fmt "\tld -T $$(pkg-config --variable=linkscript solo5-kernel-virtio)\\\n\
+	    \t  -O2 -nostdlib -z max-page-size=0x1000 -static \\\n\
+	    \t -o %s \\\n\
+        \t  $$(pkg-config --static --libs solo5-kernel-virtio)\\\n\
+        \t  _build/main.native.o \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-ocaml/libxenotherlibs.a \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-ocaml/libxenasmrun.a \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/mirage-xen-posix/libxenposix.a \\\n\
+        \t  $$(pkg-config --static --libs mirage-solo5) \\\n\
+        \t  $$(pkg-config --variable=libdir mirage-solo5)/libopenlibm.a \\\n\
+        \t  %s \\\n\
+        \t  $$(pkg-config --static --libs %s)"
+        "/tmp/iso/boot/kernel" extra_c_archives pkg_config_deps;
+      append fmt "\tcp $$(pkg-config --variable=libdir solo5-kernel-virtio)/menu.lst /tmp/iso/boot/grub";
+      append fmt "\tcp $$(pkg-config --variable=libdir solo5-kernel-virtio)/stage2_eltorito /tmp/iso/boot/grub";
+      append fmt "\tcp $$(pkg-config --variable=libdir solo5-kernel-virtio)/loader /tmp/iso/boot/";
+      append fmt "\txorriso -as mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot -boot-load-size 4 -quiet -boot-info-table -o %s /tmp/iso" (Printf.sprintf "mir-%s.iso" name);
+      append fmt "\t@@echo Build succeeded";
+      R.ok ()
+    | `Ukvm ->
       get_extra_ld_flags_solo5 libs
       >>| String.concat ~sep:" \\\n\t  "
       >>= fun extra_c_archives ->
@@ -2268,6 +2331,8 @@ module Project = struct
         Key.(abstract target);
         Key.(abstract unix);
         Key.(abstract xen);
+	Key.(abstract qemu);
+        Key.(abstract ukvm);
         Key.(abstract no_ocaml_check);
         Key.(abstract warn_error);
       ]
@@ -2276,14 +2341,14 @@ module Project = struct
         let l = [ "lwt"; "mirage-types"; "mirage-types-lwt" ] in
 		Key.match_ Key.(value target) @@function
 		  | `Xen -> "mirage-xen" :: l
-		  | `Solo5 -> "mirage-solo5" :: l
+		  | `QEMU | `Ukvm -> "mirage-solo5" :: l
 		  | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method libraries =
         let l = [ "mirage.runtime"; "mirage-types.lwt" ] in
 		Key.match_ Key.(value target) @@function
 		  | `Xen -> "mirage-xen" :: l
-		  | `Solo5 -> "mirage-solo5" :: l
+		  | `QEMU | `Ukvm -> "mirage-solo5" :: l
 		  | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method configure = configure
