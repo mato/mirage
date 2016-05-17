@@ -1,6 +1,6 @@
 # OASIS_START
-# DO NOT EDIT (digest: 7e5401a9df8c23bf64b813ba384c8232)
-version = "2.8.0"
+# DO NOT EDIT (digest: a545712371367a32c5269b7796d4f70a)
+version = "2.9.0"
 description = "Mirage configuration tool"
 requires = "ipaddr functoria mirage.runtime functoria.app logs"
 archive(byte) = "mirage.cma"
@@ -11,7 +11,7 @@ exists_if = "mirage.cma"
 package "runtime" (
  version = "2.9.0"
  description = "Mirage configuration tool"
- requires = "functoria.runtime ipaddr astring str"
+ requires = "functoria.runtime ipaddr astring logs str"
  archive(byte) = "mirage-runtime.cma"
  archive(byte, plugin) = "mirage-runtime.cma"
  archive(native) = "mirage-runtime.cmxa"

@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 711485698f608d6ac3b798132e9f3fdc)
+# DO NOT EDIT (digest: 8eb4d1f5c396a56a0f3cdb279370f0de)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -19,6 +19,7 @@ true: annot, bin_annot
 <lib_runtime/*.ml{,i,y}>: pkg_astring
 <lib_runtime/*.ml{,i,y}>: pkg_functoria.runtime
 <lib_runtime/*.ml{,i,y}>: pkg_ipaddr
+<lib_runtime/*.ml{,i,y}>: pkg_logs
 <lib_runtime/*.ml{,i,y}>: pkg_str
 # Library mirage
 "lib/mirage.cmxs": use_mirage
@@ -28,6 +29,7 @@ true: annot, bin_annot
 <lib/main.{native,byte}>: pkg_functoria.app
 <lib/main.{native,byte}>: pkg_functoria.runtime
 <lib/main.{native,byte}>: pkg_ipaddr
+<lib/main.{native,byte}>: pkg_logs
 <lib/main.{native,byte}>: pkg_str
 <lib/main.{native,byte}>: use_mirage
 <lib/main.{native,byte}>: use_mirage-runtime
@@ -36,6 +38,7 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: pkg_functoria.app
 <lib/*.ml{,i,y}>: pkg_functoria.runtime
 <lib/*.ml{,i,y}>: pkg_ipaddr
+<lib/*.ml{,i,y}>: pkg_logs
 <lib/*.ml{,i,y}>: pkg_str
 <lib/*.ml{,i,y}>: use_mirage
 <lib/*.ml{,i,y}>: use_mirage-runtime

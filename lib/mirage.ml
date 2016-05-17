@@ -28,315 +28,11 @@ include Functoria
 
 let get_target i = Key.(get (Info.context i) target)
 
-end
-
-let main_ml = ref None
-
-let append_main fmt =
-  match !main_ml with
-  | None    -> failwith "main_ml"
-  | Some oc -> append oc fmt
-
-let newline_main () =
-  match !main_ml with
-  | None    -> failwith "main_ml"
-  | Some oc -> newline oc
-
-let set_main_ml file =
-  let oc = open_out file in
-  main_ml := Some oc
-
-type mode = [
-  | `Unix
-  | `Xen
-  | `Solo5
-  | `MacOSX
-]
-
-let string_of_mode =
-  function
-  | `Unix -> "Unix"
-  | `Xen -> "Xen"
-  | `Solo5 -> "Solo5"
-  | `MacOSX -> "MacOS X"
-
-let mode : mode ref = ref `Unix
-
-let set_mode m =
-  mode := m
-
-let get_mode () =
-  !mode
-
-type _ typ =
-  | Type: 'a -> 'a typ
-  | Function: 'a typ * 'b typ -> ('a -> 'b) typ
-
-let (@->) f t =
-  Function (f, t)
-
-module type CONFIGURABLE = sig
-  type t
-  val name: t -> string
-  val module_name: t -> string
-  val packages: t -> string list
-  val libraries: t -> string list
-  val configure: t -> unit
-  val clean: t -> unit
-  val update_path: t -> string -> t
-end
-
-
-module TODO (N: sig val name: string end) = struct
-
-  let todo str =
-    failwith (Printf.sprintf "TODO: %s.%s" N.name str)
-
-  let name _ =
-    todo "name"
-
-  let module_name _ =
-    todo "module_name"
-
-  let packages _ =
-    todo "packages"
-
-  let libraries _ =
-    todo "libraries"
-
-  let configure _ =
-    todo "configure"
-
-  let clean _ =
-    todo "clean"
-
-  let update_path _ =
-    todo "update_path"
-
-end
-
-type ('a, 'b) base = {
-  typ: 'a typ;
-  t: 'b;
-  m: (module CONFIGURABLE with type t = 'b);
-}
-
-type 'a foreign = {
-  name: string;
-  ty: 'a typ;
-  libraries: string list;
-  packages: string list;
-}
-
-type _ impl =
-  | Impl: ('a, 'b) base -> 'a impl (* base implementation *)
-  | App: ('a, 'b) app -> 'b impl   (* functor application *)
-  | Foreign: 'a foreign -> 'a impl (* foreign functor implementation *)
-
-and ('a, 'b) app = {
-  f: ('a -> 'b) impl;  (* functor *)
-  x: 'a impl;          (* parameter *)
-}
-
-let rec string_of_impl: type a. a impl -> string = function
-  | Impl { t; m = (module M) } -> Printf.sprintf "Impl (%s)" (M.module_name t)
-  | Foreign { name } -> Printf.sprintf "Foreign (%s)" name
-  | App { f; x } -> Printf.sprintf "App (%s, %s)" (string_of_impl f) (string_of_impl x)
-
-type 'a folder = {
-  fn: 'b. 'a -> 'b impl -> 'a
-}
-
-let rec fold: type a. 'b folder -> a impl -> 'b -> 'b =
-  fun fn t acc ->
-    match t with
-    | Impl _
-    | Foreign _  -> fn.fn acc t
-    | App {f; x} -> fold fn f (fn.fn acc x)
-
-type iterator = {
-  i: 'b. 'b impl -> unit
-}
-
-let rec iter: type a. iterator -> a impl -> unit =
-  fun fn t ->
-    match t with
-    | Impl _
-    | Foreign _  -> fn.i t
-    | App {f; x} -> iter fn f; iter fn x; fn.i x
-
-let driver_initialisation_error name =
+(** {2 Error handling} *)
+let driver_error name =
   Printf.sprintf "fail (Failure %S)" name
 
-module Name = struct
-
-  let ids = Hashtbl.create 1024
-
-  let names = Hashtbl.create 1024
-
-  let create name =
-    let n =
-      try 1 + Hashtbl.find ids name
-      with Not_found -> 1 in
-    Hashtbl.replace ids name n;
-    Printf.sprintf "%s%d" name n
-
-  let of_key key ~base =
-    find_or_create names key (fun () -> create base)
-
-end
-
-module Impl = struct
-
-  (* get the left-most module name (ie. the name of the functor). *)
-  let rec functor_name: type a. a impl -> string = function
-    | Impl { t; m = (module M) } -> M.module_name t
-    | Foreign { name }           -> name
-    | App { f }                  -> functor_name f
-
-  (* return a unique variable name holding the state of the given
-     module construction. *)
-  let rec name: type a. a impl -> string = function
-    | Impl { t; m = (module M) } -> M.name t
-    | Foreign { name }           -> Name.of_key ("f" ^ name) ~base:"f"
-    | App _ as t                 -> Name.of_key (module_name t) ~base:"t"
-
-  (* return a unique module name holding the implementation of the
-     given module construction. *)
-  and module_name: type a. a impl -> string = function
-    | Impl { t; m = (module M) } -> M.module_name t
-    | Foreign { name }           -> name
-    | App { f; x }   ->
-      let name = match module_names f @ [module_name x] with
-        | []   -> assert false
-        | [m]  -> m
-        | h::t -> h ^ String.concat "" (List.map (Printf.sprintf "(%s)") t)
-      in
-      Name.of_key name ~base:"M"
-
-  and module_names: type a. a impl -> string list =
-    function t ->
-      let fn = {
-        fn = fun acc t -> module_name t :: acc
-      } in
-      fold fn t []
-
-  let rec names: type a. a impl -> string list = function
-    | Foreign _            -> []
-    | Impl _ as t          -> [name t]
-    | App {f=Foreign f; x} -> names x
-    | App {f; x}           -> (names f) @ [name x]
-
-  let configured = Hashtbl.create 31
-
-  let rec configure: type a. a impl -> unit =
-    fun t ->
-      let name = name t in
-      if not (Hashtbl.mem configured name) then (
-        Hashtbl.add configured name true;
-        match t with
-        | Impl { t; m = (module M) } -> M.configure t
-        | Foreign _                  -> ()
-        | App {f; x} as  app         ->
-          configure_app f;
-          configure_app x;
-          iter { i=configure } app;
-          let name = module_name app in
-          let body = cofind Name.names name in
-          append_main "module %s = %s" name body;
-          newline_main ();
-      )
-
-  and configure_app: type a. a impl -> unit = function
-    | Impl _
-    | Foreign _  -> ()
-    | App _ as t ->
-      let name = name t in
-      configure t;
-      begin match names t with
-        | [n]   -> append_main "let %s = %s" name n
-        | names ->
-          append_main "let %s () =" name;
-          List.iter (fun n ->
-              append_main "  %s () >>= function" n;
-              append_main "  | `Error e -> %s" (driver_initialisation_error n);
-              append_main "  | `Ok %s ->" n;
-            ) names;
-          append_main "  return (`Ok (%s))" (String.concat ", " names)
-      end;
-      newline_main ()
-
-  let rec packages: type a. a impl -> string list = function
-    | Impl { t; m = (module M) } -> M.packages t
-    | Foreign { packages }       -> packages
-    | App {f; x}                 -> packages f @ packages x
-
-  let rec libraries: type a. a impl -> string list = function
-    | Impl { t; m = (module M) } -> M.libraries t
-    | Foreign { libraries }      -> libraries
-    | App {f; x}                 -> libraries f @ libraries x
-
-  let rec clean: type a. a impl -> unit = function
-    | Impl { t; m = (module M) } -> M.clean t
-    | Foreign _                  -> ()
-    | App {f; x}                 -> clean f; clean x
-
-  let rec update_path: type a. a impl -> string -> a impl =
-    fun t root -> match t with
-      | Impl b     ->
-        let module M = (val b.m) in Impl { b with t = M.update_path b.t root }
-      | Foreign _  -> t
-      | App {f; x} -> App { f = update_path f root; x = update_path x root }
-
-end
-
-let impl typ t m =
-  Impl { typ; t; m }
-
-let implementation typ t m =
-  let typ = Type typ in
-  Impl { typ; t; m }
-
-let ($) f x =
-  App { f; x }
-
-let foreign name ?(libraries=[]) ?(packages=[]) ty =
-  Foreign { name; ty; libraries; packages }
-
-let rec typ: type a. a impl -> a typ = function
-  | Impl { typ } -> typ
-  | Foreign { ty } -> ty
-  | App { f }       -> match typ f with Function (_, b) -> b | _ -> assert false
-
-
-module Io_page = struct
-
-  (** Memory allocation interface. *)
-
-  type t = unit
-
-  let name () =
-    "io_page"
-
-  let module_name () =
-    "Io_page"
-
-  let packages () = [
-    "io-page"
-  ]
-
-  let libraries () =
-    match !mode with
-    | `Xen | `Solo5 -> ["io-page"]
-    | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
-
-  let configure () = ()
-
-  let clean () = ()
-
-  let update_path () _ = ()
-
-end
+(** {2 Devices} *)
 
 type io_page = IO_PAGE
 let io_page = Type IO_PAGE
@@ -358,37 +54,11 @@ let default_io_page = impl io_page_conf
 type time = TIME
 let time = Type TIME
 
-let default_time: time impl =
-  impl time () (module Time)
-
-module Clock = struct
-
-  (** Clock operations. *)
-
-  type t = unit
-
-  let name () =
-    "clock"
-
-  let module_name () =
-    "Clock"
-
-  let packages () = [
-    match !mode with
-    | `Unix | `MacOSX -> "mirage-clock-unix"
-    | `Xen | `Solo5 -> "mirage-clock-xen"
-  ]
-
-  let libraries () = packages ()
-
-  let configure () =
-    append_main "let clock () = return (`Ok ())";
-    newline_main ()
-
-  let clean () = ()
-
-  let update_path () _ = ()
-
+let time_conf = object
+  inherit base_configurable
+  method ty = time
+  method name = "time"
+  method module_name = "OS.Time"
 end
 
 let default_time = impl time_conf
@@ -413,49 +83,11 @@ let default_clock = impl clock_conf
 type random = RANDOM
 let random = Type RANDOM
 
-let default_random: random impl =
-  impl random () (module Random)
-
-module Console = struct
-
-  type t = string
-
-  let name t =
-    Name.of_key ("console" ^ t) ~base:"console"
-
-  let module_name t =
-    "Console"
-
-  let construction () =
-    match !mode with
-    | `Unix | `MacOSX -> "Console_unix"
-    | `Xen  -> "Console_xen"
-    | `Solo5  -> "Console_solo5"
-
-  let packages _ =
-    match !mode with
-    | `Unix | `MacOSX -> ["mirage-console"; "mirage-unix"]
-    | `Xen | `Solo5 -> ["mirage-console"; "xenstore"; "mirage-xen"; "xen-gnt"; "xen-evtchn"]
-
-  let libraries _ =
-    match !mode with
-    | `Unix | `MacOSX -> ["mirage-console.unix"]
-    | `Xen -> ["mirage-console.xen"]
-    | `Solo5 -> ["mirage-console.xen"; "mirage-console.solo5"]
-
-  let configure t =
-    append_main "module %s = %s" (module_name t) (construction ());
-    newline_main ();
-    append_main "let %s () =" (name t);
-    append_main "  %s.connect %S" (module_name t) t;
-    newline_main ()
-
-  let clean _ =
-    ()
-
-  let update_path t _ =
-    t
-
+let random_conf = object
+  inherit base_configurable
+  method ty = random
+  method name = "random"
+  method module_name = "Random"
 end
 
 let default_random = impl random_conf
@@ -513,37 +145,50 @@ let default_console = custom_console "0"
 type kv_ro = KV_RO
 let kv_ro = Type KV_RO
 
+let (/) = Filename.concat
 
-let crunch dirname =
-  impl kv_ro dirname (module Crunch)
+let crunch dirname = impl @@ object
+    inherit base_configurable
+    method ty = kv_ro
+    val name = Name.create ("static" ^ dirname) ~prefix:"static"
+    method name = name
+    method module_name = String.Ascii.capitalize name
+    method packages = Key.pure [ "mirage-types"; "lwt"; "cstruct"; "crunch" ]
+    method libraries = Key.pure [ "mirage-types"; "lwt"; "cstruct" ]
+    method deps = [ abstract default_io_page ]
+    method connect _ modname _ = Fmt.strf "%s.connect ()" modname
 
-module Direct_kv_ro = struct
+    method configure i =
+      if not (Cmd.exists "ocaml-crunch") then
+        Log.error "ocaml-crunch not found, stopping."
+      else begin
+        let dir = Info.root i / dirname in
+        let file = Info.root i / (name ^ ".ml") in
+        if Sys.file_exists dir then (
+          Log.info "%a %s" Log.blue "Generating:" file;
+          Cmd.run "ocaml-crunch -o %s %s" file dir
+        ) else (
+          Log.error "The directory %s does not exist." dir
+        )
+      end
 
-  include Crunch
+    method clean i =
+      Cmd.remove (Info.root i / name ^ ".ml");
+      R.ok ()
 
-  let module_name t =
-    match !mode with
-    | `Xen | `Solo5 -> Crunch.module_name t
-    | `Unix | `MacOSX -> "Kvro_fs_unix"
+  end
 
-  let packages t =
-    match !mode with
-    | `Xen | `Solo5 -> Crunch.packages t
-    | `Unix | `MacOSX -> "mirage-fs-unix" :: Crunch.packages t
-
-  let libraries t =
-    match !mode with
-    | `Xen | `Solo5 -> Crunch.libraries t
-    | `Unix | `MacOSX -> "mirage-fs-unix" :: Crunch.libraries t
-
-  let configure t =
-    match !mode with
-    | `Xen | `Solo5 -> Crunch.configure t
-    | `Unix | `MacOSX ->
-      append_main "let %s () =" (name t);
-      append_main "  Kvro_fs_unix.connect %S" t
-
-end
+let direct_kv_ro_conf dirname = impl @@ object
+    inherit base_configurable
+    method ty = kv_ro
+    val name = Name.create ("direct" ^ dirname) ~prefix:"direct"
+    method name = name
+    method module_name = "Kvro_fs_unix"
+    method packages = Key.pure ["mirage-fs-unix"]
+    method libraries = Key.pure ["mirage-fs-unix"]
+    method connect i _modname _names =
+      Fmt.strf "Kvro_fs_unix.connect %S" (Info.root i / dirname)
+  end
 
 let direct_kv_ro dirname =
   match_impl Key.(value target) [
@@ -641,133 +286,85 @@ let archive_of_files ?(dir=".") () = archive @@ tar_block dir
 type fs = FS
 let fs = Type FS
 
-let fat ?(io_page=default_io_page) block: fs impl =
-  let t = { Fat.block; io_page } in
-  impl fs t (module Fat)
+let fat_conf = impl @@ object
+    inherit base_configurable
+    method ty = (block @-> io_page @-> fs)
+    method packages = Key.pure [ "fat-filesystem" ]
+    method libraries = Key.pure [ "fat-filesystem" ]
+    method name = "fat"
+    method module_name = "Fat.Fs.Make"
+    method connect _ modname l = match l with
+      | [ block_name ; _io_page_name ] ->
+        Printf.sprintf "%s.connect %s" modname block_name
+      | _ -> assert false
+  end
 
-(* This would deserve to be in its own lib. *)
-let kv_ro_of_fs x: kv_ro impl =
-  let dummy_fat = fat (block_of_file "xx") in
-  let libraries = Impl.libraries dummy_fat in
-  let packages = Impl.packages dummy_fat in
-  let fn = foreign "Fat.KV_RO.Make" ~libraries ~packages (fs @-> kv_ro) in
-  fn $ x
+let fat ?(io_page=default_io_page) block = fat_conf $ block $ io_page
 
-module Fat_of_files = struct
+let fat_block ?(dir=".") ?(regexp="*") () =
+  let name = Name.create (Fmt.strf "fat%s:%s" dir regexp) ~prefix:"fat_block" in
+  let block_file = name ^ ".img" in
+  impl @@ object
+    inherit block_conf block_file as super
 
-  type t = {
-    dir   : string option;
-    regexp: string;
-  }
+    method configure i =
+      let root = Info.root i in
+      let file = Printf.sprintf "make-%s-image.sh" name in
+      Cmd.with_file file begin fun fmt ->
+        Codegen.append fmt "#!/bin/sh";
+        Codegen.append fmt "";
+        Codegen.append fmt "echo This uses the 'fat' command-line tool to \
+                            build a simple FAT";
+        Codegen.append fmt "echo filesystem image.";
+        Codegen.append fmt "";
+        Codegen.append fmt "FAT=$(which fat)";
+        Codegen.append fmt "if [ ! -x \"${FAT}\" ]; then";
+        Codegen.append fmt "  echo I couldn\\'t find the 'fat' command-line \
+                            tool.";
+        Codegen.append fmt "  echo Try running 'opam install fat-filesystem'";
+        Codegen.append fmt "  exit 1";
+        Codegen.append fmt "fi";
+        Codegen.append fmt "";
+        Codegen.append fmt "IMG=$(pwd)/%s" block_file;
+        Codegen.append fmt "rm -f ${IMG}";
+        Codegen.append fmt "cd %s/" (root/dir);
+        Codegen.append fmt "SIZE=$(du -s . | cut -f 1)";
+        Codegen.append fmt "${FAT} create ${IMG} ${SIZE}KiB";
+        Codegen.append fmt "${FAT} add ${IMG} %s" regexp;
+        Codegen.append fmt "echo Created '%s'" block_file;
+      end ;
+      Unix.chmod file 0o755;
+      Cmd.run "./make-%s-image.sh" name >>= fun () ->
+      super#configure i
 
-  let name t =
-    Name.of_key
-      ("fat" ^ (match t.dir with None -> "." | Some d -> d) ^ ":" ^ t.regexp)
-      ~base:"fat"
+    method clean i =
+      R.get_ok @@ Cmd.run "rm -f make-%s-image.sh %s" name block_file ;
+      super#clean i
+  end
 
-  let module_name t =
-    String.capitalize (name t)
+let fat_of_files ?dir ?regexp () = fat @@ fat_block ?dir ?regexp ()
 
-  let block_file t =
-    name t ^ ".img"
 
-  let block t =
-    block_of_file (block_file t)
+let kv_ro_of_fs_conf = impl @@ object
+    inherit base_configurable
+    method ty = fs @-> kv_ro
+    method name = "kv_ro_of_fs"
+    method module_name = "Fat.KV_RO.Make"
+    method packages = Key.pure [ "fat-filesystem" ]
+    method libraries = Key.pure [ "fat-filesystem" ]
+  end
 
-  let packages t =
-    Impl.packages (fat (block t))
+let kv_ro_of_fs x = kv_ro_of_fs_conf $ x
 
-  let libraries t =
-    Impl.libraries (fat (block t))
+(** generic kv_ro. *)
 
-  let configure t =
-    let fat = fat (block t) in
-    Impl.configure fat;
-    append_main "module %s = %s" (module_name t) (Impl.module_name fat);
-    append_main "let %s = %s" (name t) (Impl.name fat);
-    newline_main ();
-    let file = Printf.sprintf "make-%s-image.sh" (name t) in
-    let oc = open_out file in
-    append oc "#!/bin/sh";
-    append oc "";
-    append oc "echo This uses the 'fat' command-line tool to build a simple FAT";
-    append oc "echo filesystem image.";
-    append oc "";
-    append oc "FAT=$(which fat)";
-    append oc "if [ ! -x \"${FAT}\" ]; then";
-    append oc "  echo I couldn\\'t find the 'fat' command-line tool.";
-    append oc "  echo Try running 'opam install fat-filesystem'";
-    append oc "  exit 1";
-    append oc "fi";
-    append oc "";
-    append oc "IMG=$(pwd)/%s" (block_file t);
-    append oc "rm -f ${IMG}";
-    (match t.dir with None -> () | Some d -> append oc "cd %s/" d);
-    append oc "SIZE=$(du -s . | cut -f 1)";
-    append oc "${FAT} create ${IMG} ${SIZE}KiB";
-    append oc "${FAT} add ${IMG} %s" t.regexp;
-    append oc "echo Created '%s'" (block_file t);
+let generic_kv_ro ?(key = Key.value @@ Key.kv_ro ()) dir =
+  match_impl key [
+    `Fat    , kv_ro_of_fs @@ fat_of_files ~dir () ;
+    `Archive, archive_of_files ~dir () ;
+  ] ~default:(direct_kv_ro dir)
 
-    close_out oc;
-    Unix.chmod file 0o755;
-    command "./make-%s-image.sh" (name t)
-
-  let clean t =
-    command "rm -f make-%s-image.sh %s" (name t) (block_file t);
-    Impl.clean (block t)
-
-  let update_path t root =
-    match t.dir with
-    | None   -> t
-    | Some d -> { t with dir = Some (root / d) }
-
-end
-
-let fat_of_files: ?dir:string -> ?regexp:string -> unit -> fs impl =
-  fun ?dir ?regexp () ->
-    let regexp = match regexp with
-      | None   -> "*"
-      | Some r -> r in
-    impl fs { Fat_of_files.dir; regexp } (module Fat_of_files)
-
-type network_config = Tap0 | Custom of string
-
-module Network = struct
-
-  type t = network_config
-
-  let name t =
-    "net_" ^ match t with
-    | Tap0     -> "tap0"
-    | Custom s -> s
-
-  let module_name _ =
-    "Netif"
-
-  let packages t =
-    match !mode with
-    | `Unix -> ["mirage-net-unix"]
-    | `MacOSX -> ["mirage-net-macosx"]
-    | `Xen -> ["mirage-net-xen"]
-    | `Solo5 -> ["mirage-net-solo5"]
-
-  let libraries t =
-    packages t
-
-  let configure t =
-    append_main "let %s () =" (name t);
-    append_main "  %s.connect %S"
-      (module_name t)
-      (match t with Tap0 -> "tap0" | Custom s -> s);
-    newline_main ()
-
-  let clean _ =
-    ()
-
-  let update_path t _ =
-    t
-
-end
+(** network devices *)
 
 type network = NETWORK
 let network = Type NETWORK
@@ -789,18 +386,16 @@ let network_conf (intf : string Key.key) =
       | `Unix         -> ["mirage-net-unix"]
       | `MacOSX       -> ["mirage-net-macosx"]
       | `Xen          -> ["mirage-net-xen"]
-      | `QEMU | `Ukvm -> ["mirage-net-solo5"]
+	  | `QEMU | `Ukvm -> ["mirage-net-solo5"]
 
     method libraries = self#packages
 
     method connect _ modname _ =
       Fmt.strf "%s.connect %a" modname Key.serialize_call key
 
-  let libraries t =
-    Impl.libraries t @
-    match !mode with
-    | `Unix | `MacOSX -> [ "tcpip.ethif-unix" ]
-    | `Xen | `Solo5 -> [ "tcpip.ethif" ]
+    method configure i =
+      all_networks := Key.get (Info.context i) intf :: !all_networks;
+      R.ok ()
 
   end
 
@@ -851,159 +446,6 @@ type ('ipaddr, 'prefix) ip_config = {
   netmask: 'prefix;
   gateways: 'ipaddr list;
 }
-
-type ipv4_config = (Ipaddr.V4.t, Ipaddr.V4.t) ip_config
-
-let meta_ipv4_config t =
-  Printf.sprintf "(Ipaddr.V4.of_string_exn %S, Ipaddr.V4.of_string_exn %S, [%s])"
-    (Ipaddr.V4.to_string t.address)
-    (Ipaddr.V4.to_string t.netmask)
-    (String.concat "; "
-       (List.map (Printf.sprintf "Ipaddr.V4.of_string_exn %S")
-          (List.map Ipaddr.V4.to_string t.gateways)))
-
-module IPV4 = struct
-
-  type t = {
-    arpv4 : arpv4 impl;
-    config  : ipv4_config;
-  }
-  (* XXX: should the type if ipv4.id be ipv4.t ?
-     N.connect ethif |> N.set_ip up *)
-
-  let name t =
-    let key = "ipv4" ^ Impl.name t.arpv4 ^ meta_ipv4_config t.config in
-    Name.of_key key ~base:"ipv4"
-
-  let module_name t =
-    String.capitalize (name t)
-
-  let packages t =
-    "tcpip" :: Impl.packages t.arpv4 
-
-  let libraries t  =
-    (match !mode with
-     | `Unix | `MacOSX -> [ "tcpip.ipv4-unix" ]
-     | `Xen | `Solo5 -> [ "tcpip.ipv4" ])
-    @ Impl.libraries t.arpv4
-
-  let configure t =
-    let name = name t in
-    let mname = module_name t in
-    Impl.configure t.arpv4;
-    append_main "module %s = Ipv4.Make(%s)"
-      (module_name t) (Impl.module_name t.arpv4);
-    newline_main ();
-    append_main "let %s () =" name;
-    append_main "   %s () >>= function" (Impl.name t.arpv4);
-    append_main "   | `Error _ -> %s" (driver_initialisation_error name);
-    append_main "   | `Ok arp ->";
-    append_main "   %s.connect arp >>= function" mname;
-    append_main "   | `Error _ -> %s" (driver_initialisation_error "IPV4");
-    append_main "   | `Ok ip   ->";
-    append_main "   let i = Ipaddr.V4.of_string_exn in";
-    append_main "   %s.set_ip ip (i %S) >>= fun () ->"
-      mname (Ipaddr.V4.to_string t.config.address);
-    append_main "   %s.set_ip_netmask ip (i %S) >>= fun () ->"
-      mname (Ipaddr.V4.to_string t.config.netmask);
-    append_main "   %s.set_ip_gateways ip [%s] >>= fun () ->"
-      mname
-      (String.concat "; "
-         (List.map
-            (fun n -> Printf.sprintf "(i %S)" (Ipaddr.V4.to_string n))
-            t.config.gateways));
-    append_main "   return (`Ok ip)";
-    newline_main ()
-
-  let clean t =
-    Impl.clean t.arpv4
-
-  let update_path t root =
-    { t with arpv4 = Impl.update_path t.arpv4 root }
-
-end
-
-type ipv6_config = (Ipaddr.V6.t, Ipaddr.V6.Prefix.t list) ip_config
-
-let meta_ipv6_config t =
-  Printf.sprintf "(Ipaddr.V6.of_string_exn %S, [%s], [%s])"
-    (Ipaddr.V6.to_string t.address)
-    (String.concat "; "
-       (List.map (Printf.sprintf "Ipaddr.V6.Prefix.of_string_exn %S")
-          (List.map Ipaddr.V6.Prefix.to_string t.netmask)))
-    (String.concat "; "
-       (List.map (Printf.sprintf "Ipaddr.V6.of_string_exn %S")
-          (List.map Ipaddr.V6.to_string t.gateways)))
-
-module IPV6 = struct
-
-  type t = {
-    time    : time impl;
-    clock   : clock impl;
-    ethernet: ethernet impl;
-    config  : ipv6_config;
-  }
-  (* XXX: should the type if ipv4.id be ipv4.t ?
-     N.connect ethif |> N.set_ip up *)
-
-  let name t =
-    let key = "ipv6" ^ Impl.name t.time ^ Impl.name t.clock ^ Impl.name t.ethernet ^ meta_ipv6_config t.config in
-    Name.of_key key ~base:"ipv6"
-
-  let module_name t =
-    String.capitalize (name t)
-
-  let packages t =
-    "tcpip" :: Impl.packages t.time @ Impl.packages t.clock @ Impl.packages t.ethernet
-
-  let libraries t  =
-    (match !mode with
-     | `Unix | `MacOSX -> [ "tcpip.ipv6-unix" ]
-     | `Xen | `Solo5 -> [ "tcpip.ipv6" ])
-    @ Impl.libraries t.time @ Impl.libraries t.clock @ Impl.libraries t.ethernet
-
-  let configure t =
-    let name = name t in
-    let mname = module_name t in
-    Impl.configure t.ethernet;
-    append_main "module %s = Ipv6.Make(%s)(%s)(%s)"
-      (module_name t) (Impl.module_name t.ethernet) (Impl.module_name t.time) (Impl.module_name t.clock);
-    newline_main ();
-    append_main "let %s () =" name;
-    append_main "   %s () >>= function" (Impl.name t.ethernet);
-    append_main "   | `Error _ -> %s" (driver_initialisation_error name);
-    append_main "   | `Ok eth  ->";
-    append_main "   %s.connect eth >>= function" mname;
-    append_main "   | `Error _ -> %s" (driver_initialisation_error name);
-    append_main "   | `Ok ip   ->";
-    append_main "   let i = Ipaddr.V6.of_string_exn in";
-    append_main "   %s.set_ip ip (i %S) >>= fun () ->"
-      mname (Ipaddr.V6.to_string t.config.address);
-    List.iter begin fun netmask ->
-      append_main "   %s.set_ip_netmask ip (i %S) >>= fun () ->"
-        mname (Ipaddr.V6.Prefix.to_string netmask)
-    end t.config.netmask;
-    append_main "   %s.set_ip_gateways ip [%s] >>= fun () ->"
-      mname
-      (String.concat "; "
-         (List.map
-            (fun n -> Printf.sprintf "(i %S)" (Ipaddr.V6.to_string n))
-            t.config.gateways));
-    append_main "   return (`Ok ip)";
-    newline_main ()
-
-  let clean t =
-    Impl.clean t.time;
-    Impl.clean t.clock;
-    Impl.clean t.ethernet
-
-  let update_path t root =
-    { t with
-      time = Impl.update_path t.time root;
-      clock = Impl.update_path t.clock root;
-      ethernet = Impl.update_path t.ethernet root }
-
-end
 
 type v4
 type v6
@@ -1122,38 +564,8 @@ let icmpv4_direct_conf () = object
     | _  -> failwith "The icmpv4 connect should receive exactly one argument."
 end
 
-module UDPV4_socket = struct
-
-  type t = Ipaddr.V4.t option
-
-  let name _ = "udpv4_socket"
-
-  let module_name _ = "Udpv4_socket"
-
-  let packages t = [ "tcpip" ]
-
-  let libraries t =
-    match !mode with
-    | `Unix | `MacOSX -> [ "tcpip.udpv4-socket" ]
-    | `Xen | `Solo5 -> failwith "No socket implementation available for Xen"
-
-  let configure t =
-    append_main "let %s () =" (name t);
-    let ip = match t with
-      | None    -> "None"
-      | Some ip ->
-        Printf.sprintf "Some (Ipaddr.V4.of_string_exn %s)" (Ipaddr.V4.to_string ip)
-    in
-    append_main " %s.connect %S" (module_name t) ip;
-    newline_main ()
-
-  let clean t =
-    ()
-
-  let update_path t root =
-    t
-
-end
+let icmpv4_direct_func () = impl (icmpv4_direct_conf ())
+let direct_icmpv4 ip = icmpv4_direct_func () $ ip
 
 type 'a udp = UDP
 type udpv4 = v4 udp
@@ -1176,7 +588,9 @@ let udp_direct_conf () = object
     | _  -> failwith "The udpv6 connect should receive exactly one argument."
 end
 
-module TCPV4_socket = struct
+(* Value restriction ... *)
+let udp_direct_func () = impl (udp_direct_conf ())
+let direct_udp ip = udp_direct_func () $ ip
 
 let udpv4_socket_conf ipv4_key = object
   inherit base_configurable
@@ -1455,36 +869,27 @@ let tls_conduit_connector = impl @@ object
 type conduit = Conduit
 let conduit = Type Conduit
 
-let conduit_direct ?(tls=false) s =
-  impl conduit { Conduit.stackv4 = Some s; tls } (module Conduit)
+let conduit_with_connectors connectors = impl @@ object
+    inherit base_configurable
+    method ty = conduit
+    method name = Name.create "conduit" ~prefix:"conduit"
+    method module_name = "Conduit_mirage"
+    method packages = Key.pure [ "mirage-conduit" ]
+    method libraries = Key.pure [ "conduit.mirage" ]
+    method deps = abstract nocrypto :: List.map abstract connectors
 
-module Resolver_unix = struct
-  type t = unit
-
-  let name t =
-    let key = "resolver_unix" in
-    Name.of_key key ~base:"resolver"
-
-  let module_name t =
-    String.capitalize (name t)
-
-  let packages t =
-    match !mode with
-    |`Unix | `MacOSX -> [ "mirage-conduit" ]
-    |`Xen | `Solo5 -> failwith "Resolver_unix not supported on Xen"
-
-  let libraries t =
-    [ "conduit.mirage"; "conduit.lwt-unix" ]
-
-  let configure t =
-    append_main "module %s = Resolver_lwt" (module_name t);
-    append_main "let %s () =" (name t);
-    append_main "  return (`Ok Resolver_lwt_unix.system)";
-    newline_main ()
-
-  let clean t = ()
-
-  let update_path t root = t
+    method connect _i _ = function
+      (* There is always at least the nocrypto device *)
+      | [] -> invalid_arg "Mirage.conduit_with_connector"
+      | _nocrypto :: connectors ->
+        let pp_connector = Fmt.fmt "%s >>=@ " in
+        let pp_connectors = Fmt.list ~sep:Fmt.nop pp_connector in
+        Fmt.strf
+          "Lwt.return Conduit_mirage.empty >>=@ \
+           %a\
+           fun t -> Lwt.return (`Ok t)"
+          pp_connectors connectors
+  end
 
 let conduit_direct ?(tls=false) s =
   (* TCP must be before tls in the list. *)
@@ -1542,44 +947,38 @@ let resolver_dns ?ns ?ns_port ?(time = default_time) stack =
 type http = HTTP
 let http = Type HTTP
 
-let http_server conduit = impl http { HTTP.conduit } (module HTTP)
+let http_server conduit = impl @@ object
+    inherit base_configurable
+    method ty = http
+    method name = "http"
+    method module_name = "Cohttp_mirage.Server_with_conduit"
+    method packages = Key.pure [ "mirage-http" ]
+    method libraries = Key.pure [ "mirage-http" ]
+    method deps = [ abstract conduit ]
+    method connect _i modname = function
+      | [ conduit ] -> Fmt.strf "%s.connect %s" modname conduit
+      | _ -> failwith "The http connect should receive exactly one argument."
+  end
 
-type job = JOB
+(** Argv *)
 
-let job = Type JOB
+let argv_unix = impl @@ object
+    inherit base_configurable
+    method ty = Functoria_app.argv
+    method name = "argv_unix"
+    method module_name = "OS.Env"
+    method connect _ _ _ = "OS.Env.argv () >>= (fun x -> Lwt.return (`Ok x))"
+  end
 
-module Job = struct
-
-  type t = {
-    name: string;
-    impl: job impl;
-  }
-
-  let create impl =
-    let name = Name.create "job" in
-    { name; impl }
-
-  let name t =
-    t.name
-
-  let module_name t =
-    "Job_" ^ t.name
-
-  let packages t =
-    Impl.packages t.impl
-
-  let libraries t =
-    Impl.libraries t.impl
-
-  let configure t =
-    Impl.configure t.impl;
-    newline_main ()
-
-  let clean t =
-    Impl.clean t.impl
-
-  let update_path t root =
-    { t with impl = Impl.update_path t.impl root }
+let argv_xen = impl @@ object
+    inherit base_configurable
+    method ty = Functoria_app.argv
+    method name = "argv_xen"
+    method module_name = "Bootvar"
+    method packages = Key.pure [ "mirage-bootvar-xen" ]
+    method libraries = Key.pure [ "mirage-bootvar" ]
+    method connect _ _ _ = "Bootvar.argv ()"
+  end
 
 let argv_solo5 = impl @@ object
     inherit base_configurable
@@ -1589,6 +988,14 @@ let argv_solo5 = impl @@ object
     method packages = Key.pure [ "mirage-bootvar-solo5" ]
     method libraries = Key.pure [ "mirage-bootvar" ]
     method connect _ _ _ = "Bootvar.argv ()"
+  end
+
+let no_argv = impl @@ object
+    inherit base_configurable
+    method ty = Functoria_app.argv
+    method name = "argv_empty"
+    method module_name = "Mirage_runtime"
+    method connect _ _ _ = "Lwt.return (`Ok [|\"\"|])"
   end
 
 let argv_dynamic =
@@ -1604,95 +1011,59 @@ let default_argv = match_impl Key.(value target) [
   `Ukvm, argv_solo5 ;
 ] ~default:(argv_unix)
 
-  let libraries _ =
-    match !mode with
-    | `Unix | `MacOSX -> StringSet.singleton "mirage-profile.unix"
-    | `Xen | `Solo5 -> StringSet.singleton "mirage-profile.xen"
+(** Log reporting *)
 
-  let configure t =
-    if Sys.command "ocamlfind query lwt.tracing 2>/dev/null" <> 0 then (
-      flush stdout;
-      error "lwt.tracing module not found. Hint:\n\
-             opam pin add lwt 'https://github.com/mirage/lwt.git#tracing'"
-    );
+type reporter = job
+let reporter = job
 
-    append_main "let () = ";
-    begin match !mode with
-    | `Unix | `MacOSX ->
-        append_main "  let buffer = MProf_unix.mmap_buffer ~size:%d %S in" t.size unix_trace_file;
-        append_main "  let trace_config = MProf.Trace.Control.make buffer MProf_unix.timestamper in";
-        append_main "  MProf.Trace.Control.start trace_config";
-    | `Xen | `Solo5 ->
-        append_main "  let trace_pages = MProf_xen.make_shared_buffer ~size:%d in" t.size;
-        append_main "  let buffer = trace_pages |> Io_page.to_cstruct |> Cstruct.to_bigarray in";
-        append_main "  let trace_config = MProf.Trace.Control.make buffer MProf_xen.timestamper in";
-        append_main "  MProf.Trace.Control.start trace_config;";
-        append_main "  MProf_xen.share_with (module Gnt.Gntshr) (module OS.Xs) ~domid:0 trace_pages";
-        append_main "  |> OS.Main.run";
-    end;
-    newline_main ()
-end
+let pp_level ppf = function
+  | Logs.Error    -> Fmt.string ppf "Logs.Error"
+  | Logs.Warning  -> Fmt.string ppf "Logs.Warning"
+  | Logs.Info     -> Fmt.string ppf "Logs.Info"
+  | Logs.Debug    -> Fmt.string ppf "Logs.Debug"
+  | Logs.App      -> Fmt.string ppf "Logs.App"
 
-type tracing = Tracing.t
+let mirage_log ?ring_size ~default =
+  let logs = Key.logs in
+  impl @@ object
+    inherit base_configurable
+    method ty = clock @-> reporter
+    method name = "mirage_logs"
+    method module_name = "Mirage_logs.Make"
+    method packages = Key.pure ["mirage-logs"]
+    method libraries = Key.pure ["mirage-logs"]
+    method keys = [ Key.abstract logs ]
+    method connect _ modname _ =
+      Fmt.strf
+        "@[<v 2>\
+         let ring_size = %a in@ \
+         let reporter = %s.create ?ring_size () in@ \
+         Mirage_runtime.set_level ~default:%a %a;@ \
+         %s.set_reporter reporter;@ \
+         Lwt.return (`Ok reporter)"
+        Fmt.(Dump.option int) ring_size
+        modname
+        pp_level default
+        pp_key logs
+        modname
+  end
 
-let mprof_trace ~size () =
-  { Tracing.size }
+let default_reporter
+    ?(clock=default_clock) ?ring_size ?(level=Logs.Info) () =
+  mirage_log ?ring_size ~default:level $ clock
 
-module Nocrypto_entropy = struct
+let no_reporter = impl @@ object
+    inherit base_configurable
+    method ty = reporter
+    method name = "no_reporter"
+    method module_name = "Mirage_runtime"
+    method connect _ _ _ = "assert false"
+  end
 
-  (* XXX
-   * Nocrypto needs `mirage-entropy-xen` if compiled for xen.
-   * This is currently handled by always installing this library, regardless of
-   * usage of Nocrypto.
-   * As `libraries` is run after opam setup, it will correctly detect Nocrypto
-   * usage and inject appropriate deps for linkage, if needed.
-   * The `packages` function, unconditional installation of
-   * `mirage-entropy-xen`, and this comment, should be cleared once we have
-   * conditional dependencies support in opam.
-   * See https://github.com/mirage/mirage/pull/394 for discussion.
-   *)
+(** Tracing *)
 
-  module SS = StringSet
-
-  let remembering r f =
-    match !r with
-    | Some x -> x
-    | None   -> let x = f () in r := Some x ; x
-
-  let linkage_ = ref None
-
-  let linkage () =
-    match !linkage_ with
-    | None   -> failwith "Nocrypto_entropy: `linkage` queried before `libraries`"
-    | Some x -> x
-
-  let packages () =
-    match !mode with
-    | `Xen -> SS.singleton "mirage-entropy-xen"
-    | _    -> SS.empty
-
-  let libraries libs =
-    remembering linkage_ @@ fun () ->
-      let needed =
-        OCamlfind.query ~recursive:true (SS.elements libs)
-          |> List.exists ((=) "nocrypto") in
-      match !mode with
-      | (`Xen  | `Solo5)  when needed -> SS.singleton "nocrypto.xen"
-      | (`Unix | `MacOSX) when needed -> SS.singleton "nocrypto.lwt"
-      | _                             -> SS.empty
-
-  let configure () =
-    SS.elements (linkage ()) |> List.iter (fun lib ->
-      if not (OCamlfind.installed lib) then
-        error "%s module not found. Hint: reinstall nocrypto." lib
-      )
-
-  let preamble () =
-    match (!mode, not (SS.is_empty @@ linkage ())) with
-    | ((`Xen  | `Solo5), true) -> "Nocrypto_entropy_xen.initialize ()"
-    | ((`Unix | `MacOSX), true) -> "Nocrypto_entropy_lwt.initialize ()"
-    | _                         -> "return_unit"
-end
+type tracing = job
+let tracing = job
 
 let mprof_trace ~size () =
   let unix_trace_file = "trace.ctf" in
@@ -1709,7 +1080,15 @@ let mprof_trace ~size () =
 		| `Xen | `QEMU | `Ukvm -> ["mirage-profile.xen"]
 		| `Unix | `MacOSX -> ["mirage-profile.unix"]
 
-let t = ref None
+    method configure _ =
+      if Sys.command "ocamlfind query lwt.tracing 2>/dev/null" = 0
+      then R.ok ()
+      else begin
+        flush stdout;
+        Log.error
+          "lwt.tracing module not found. Hint:\n\
+           opam pin add lwt 'https://github.com/mirage/lwt.git#tracing'"
+      end
 
     method connect i _ _ = match Key.(get (Info.context i) target) with
       | `Unix | `MacOSX ->
@@ -1733,108 +1112,66 @@ let t = ref None
              |> OS.Main.run@]"
           Key.serialize_call (Key.abstract key)
 
-let reset () =
-  config_file := None;
-  t := None
+  end
 
-let set_config_file f =
-  config_file := Some f
+(** Functoria devices *)
 
-let get_config_file () =
-  match !config_file with
-  | None -> Sys.getcwd () / "config.ml"
-  | Some f -> f
+type info = Functoria_app.info
+let noop = Functoria_app.noop
+let info = Functoria_app.info
+let app_info = Functoria_app.app_info ~type_modname:"Mirage_info" ()
 
-let update_path t root =
-  { t with jobs = List.map (fun j -> Impl.update_path j root) t.jobs }
-
-let register ?tracing name jobs =
-  let root = match !config_file with
-    | None   -> failwith "no config file"
-    | Some f -> Filename.dirname f in
-  t := Some { name; jobs; root; tracing }
-
-let registered () =
-  match !t with
-  | None   -> { name = "empty"; jobs = []; root = Sys.getcwd (); tracing = None }
-  | Some t -> t
-
-let ps = ref StringSet.empty
-
-let add_to_opam_packages p =
-  ps := StringSet.union (StringSet.of_list p) !ps
-
-let packages t =
-  let m = match !mode with
-    | `Unix | `MacOSX -> "mirage-unix"
-    | `Xen | `Solo5 -> "mirage-xen" in
-  let ps = StringSet.add m !ps in
-  let ps = match t.tracing with
-    | None -> ps
-    | Some tracing -> StringSet.union (Tracing.packages tracing) ps in
-  let ps = List.fold_left (fun set j ->
-      let ps = StringSet.of_list (Impl.packages j) in
-      StringSet.union ps set
-    ) ps t.jobs in
-  let ps = StringSet.union ps (Nocrypto_entropy.packages ()) in
-  StringSet.elements ps
-
-let ls = ref StringSet.empty
-
-let add_to_ocamlfind_libraries l =
-  ls := StringSet.union !ls (StringSet.of_list l)
-
-let libraries t =
-  let m = match !mode with
-    | `Unix | `MacOSX -> "mirage-types.lwt"
-    | `Xen | `Solo5 -> "mirage-types.lwt" in
-  let ls = StringSet.add m !ls in
-  let ls = match t.tracing with
-    | None -> ls
-    | Some tracing -> StringSet.union (Tracing.libraries tracing) ls in
-  let ls = List.fold_left (fun set j ->
-      let ls = StringSet.of_list (Impl.libraries j) in
-      StringSet.union ls set
-    ) ls t.jobs in
-  let ls = StringSet.union ls (Nocrypto_entropy.libraries ls) in
-  StringSet.elements ls
-
-let configure_myocamlbuild_ml t =
-  let minor, major = ocaml_version () in
-  if minor < 4 || major < 1 then (
-    (* Previous ocamlbuild versions weren't able to understand the
-       --output-obj rules *)
-    let file = t.root / "myocamlbuild.ml" in
-    let oc = open_out file in
-    append oc "(* %s *)" generated_by_mirage;
-    newline oc;
-    append oc
-      "open Ocamlbuild_pack;;\n\
-       open Ocamlbuild_plugin;;\n\
-       open Ocaml_compiler;;\n\
-       \n\
-       let native_link_gen linker =\n\
-      \  link_gen \"cmx\" \"cmxa\" !Options.ext_lib [!Options.ext_obj; \"cmi\"] linker;;\n\
-       \n\
-       let native_output_obj x = native_link_gen ocamlopt_link_prog\n\
-      \  (fun tags -> tags++\"ocaml\"++\"link\"++\"native\"++\"output_obj\") x;;\n\
-       \n\
-       rule \"ocaml: cmx* & o* -> native.o\"\n\
-      \  ~tags:[\"ocaml\"; \"native\"; \"output_obj\" ]\n\
-      \  ~prod:\"%%.native.o\" ~deps:[\"%%.cmx\"; \"%%.o\"]\n\
-      \  (native_output_obj \"%%.cmx\" \"%%.native.o\");;\n\
-       \n\
-       \n\
-       let byte_link_gen = link_gen \"cmo\" \"cma\" \"cma\" [\"cmo\"; \"cmi\"];;\n\
-       let byte_output_obj = byte_link_gen ocamlc_link_prog\n\
-      \  (fun tags -> tags++\"ocaml\"++\"link\"++\"byte\"++\"output_obj\");;\n\
-       \n\
-       rule \"ocaml: cmo* -> byte.o\"\n\
-      \  ~tags:[\"ocaml\"; \"byte\"; \"link\"; \"output_obj\" ]\n\
-       ~prod:\"%%.byte.o\" ~dep:\"%%.cmo\"\n\
-      \  (byte_output_obj \"%%.cmo\" \"%%.byte.o\");;";
-    close_out oc
-  )
+let configure_main_libvirt_xml ~root ~name =
+  let open Codegen in
+  let file = root / name ^ "_libvirt.xml" in
+  Cmd.with_file file @@ fun fmt ->
+  append fmt "<!-- %s -->" (generated_header ());
+  append fmt "<domain type='xen'>";
+  append fmt "    <name>%s</name>" name;
+  append fmt "    <memory unit='KiB'>262144</memory>";
+  append fmt "    <currentMemory unit='KiB'>262144</currentMemory>";
+  append fmt "    <vcpu placement='static'>1</vcpu>";
+  append fmt "    <os>";
+  append fmt "        <type arch='armv7l' machine='xenpv'>linux</type>";
+  append fmt "        <kernel>%s/mir-%s.xen</kernel>" root name;
+  append fmt "        <cmdline> </cmdline>";
+  (* the libxl driver currently needs an empty cmdline to be able to
+     start the domain on arm - due to this?
+     http://lists.xen.org/archives/html/xen-devel/2014-02/msg02375.html *)
+  append fmt "    </os>";
+  append fmt "    <clock offset='utc' adjustment='reset'/>";
+  append fmt "    <on_crash>preserve</on_crash>";
+  append fmt "    <!-- ";
+  append fmt "    You must define network and block interfaces manually.";
+  append fmt "    See http://libvirt.org/drvxen.html for information about \
+              converting .xl-files to libvirt xml automatically.";
+  append fmt "    -->";
+  append fmt "    <devices>";
+  append fmt "        <!--";
+  append fmt "        The disk configuration is defined here:";
+  append fmt "        http://libvirt.org/formatstorage.html.";
+  append fmt "        An example would look like:";
+  append fmt"         <disk type='block' device='disk'>";
+  append fmt "            <driver name='phy'/>";
+  append fmt "            <source dev='/dev/loop0'/>";
+  append fmt "            <target dev='' bus='xen'/>";
+  append fmt "        </disk>";
+  append fmt "        -->";
+  append fmt "        <!-- ";
+  append fmt "        The network configuration is defined here:";
+  append fmt "        http://libvirt.org/formatnetwork.html";
+  append fmt "        An example would look like:";
+  append fmt "        <interface type='bridge'>";
+  append fmt "            <mac address='c0:ff:ee:c0:ff:ee'/>";
+  append fmt "            <source bridge='br0'/>";
+  append fmt "        </interface>";
+  append fmt "        -->";
+  append fmt "        <console type='pty'>";
+  append fmt "            <target type='xen' port='0'/>";
+  append fmt "        </console>";
+  append fmt "    </devices>";
+  append fmt "</domain>";
+  ()
 
 let clean_main_libvirt_xml ~root ~name =
   Cmd.remove (root / name ^ "_libvirt.xml")
@@ -2121,7 +1458,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
   begin match target with
     | `Xen ->
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
-      append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
+      append fmt "FLAGS  = -r -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append fmt "XENLIB = $(shell ocamlfind query mirage-xen)\n"
     | `QEMU | `Ukvm ->
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
@@ -2331,7 +1668,7 @@ module Project = struct
         Key.(abstract target);
         Key.(abstract unix);
         Key.(abstract xen);
-	Key.(abstract qemu);
+		Key.(abstract qemu);
         Key.(abstract ukvm);
         Key.(abstract no_ocaml_check);
         Key.(abstract warn_error);
