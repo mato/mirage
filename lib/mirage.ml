@@ -1631,7 +1631,8 @@ module Project = struct
         let l = [ "lwt"; "mirage-types"; "mirage-types-lwt" ] in
 		Key.match_ Key.(value target) @@function
 		  | `Xen -> "mirage-xen" :: l
-		  | `QEMU | `Ukvm -> "mirage-solo5" :: l
+		  | `QEMU -> "solo5-kernel-virtio" :: "mirage-solo5" :: l
+		  | `Ukvm -> "solo5-kernel-ukvm" :: "mirage-solo5" :: l
 		  | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method libraries =
