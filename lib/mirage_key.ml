@@ -65,7 +65,7 @@ let pp_group =
 type mode = [
   | `Unix
   | `Xen
-  | `QEMU
+  | `Virtio
   | `Ukvm
   | `MacOSX
 ]
@@ -75,8 +75,8 @@ let target_conv: mode Cmdliner.Arg.converter =
     "unix"  , `Unix;
     "macosx", `MacOSX;
     "xen"   , `Xen;
-    "qemu" , `QEMU;
-  	"ukvm" , `Ukvm;
+    "virtio", `Virtio;
+    "ukvm"  , `Ukvm;
   ]
 
 let pp_target fmt m = snd target_conv fmt m
@@ -104,14 +104,14 @@ let default_unix = lazy (
 let target =
   let doc =
     "Target platform to compile the unikernel for. Valid values are: \
-     $(i,xen), $(i,unix), $(i,macosx), $(i,qemu), $(i,ukvm)."
+     $(i,xen), $(i,unix), $(i,macosx), $(i,virtio), $(i,ukvm)."
   in
   let serialize ppf = function
-    | `Unix   -> Fmt.pf ppf "`Unix"
     | `Xen    -> Fmt.pf ppf "`Xen"
-	| `QEMU  -> Fmt.pf ppf "`QEMU"
-	| `Ukvm  -> Fmt.pf ppf "`Ukvm"          
+    | `Unix   -> Fmt.pf ppf "`Unix"
     | `MacOSX -> Fmt.pf ppf "`MacOSX"
+    | `Virtio -> Fmt.pf ppf "`Virtio"
+    | `Ukvm   -> Fmt.pf ppf "`Ukvm"
   in
   let conv = Arg.conv ~conv:target_conv ~runtime_conv:"target" ~serialize in
   let doc =
@@ -124,7 +124,7 @@ let target =
 let is_xen =
   Key.match_ Key.(value target) @@ function
   | `Xen -> true
-  | `Unix | `MacOSX | `QEMU | `Ukvm -> false
+  | `Unix | `MacOSX | `Virtio | `Ukvm -> false
 
 let unix =
   let doc =
@@ -146,13 +146,13 @@ let xen =
   let alias = Alias.add target setter alias in
   Key.alias "xen" alias
 
-let qemu =
-  let doc = "Set $(b,target) to $(i,qemu)." in
-  let doc = Arg.info ~docs:mirage_section ~docv:"BOOL" ~doc ["qemu"] in
-  let setter b = if b then Some `QEMU else None in
+let virtio =
+  let doc = "Set $(b,target) to $(i,virtio)." in
+  let doc = Arg.info ~docs:mirage_section ~docv:"BOOL" ~doc ["virtio"] in
+  let setter b = if b then Some `Virtio else None in
   let alias = Alias.flag doc in
   let alias = Alias.add target setter alias in
-  Key.alias "qemu" alias
+  Key.alias "virtio" alias
 
 let ukvm =
   let doc = "Set $(b,target) to $(i,ukvm)." in

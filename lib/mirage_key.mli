@@ -27,12 +27,12 @@ include Functoria.KEY with module Arg := Arg
 
 (** {2 Mirage keys} *)
 
-val target: [ `Unix | `Xen | `MacOSX | `QEMU | `Ukvm ] key
+val target: [ `Unix | `Xen | `MacOSX | `Virtio | `Ukvm ] key
 (** [-t TARGET]: Key setting the configuration mode for the current project.
-    Is either ["xen"], ["unix"] or ["macosx"].
+    Is either ["xen"], ["unix"], ["macosx"], ["virtio"] or ["ukvm"].
 *)
 
-val pp_target: [ `Unix | `Xen | `MacOSX | `QEMU | `Ukvm ] Fmt.t
+val pp_target: [ `Unix | `Xen | `MacOSX | `Virtio | `Ukvm ] Fmt.t
 (** Pretty printer for the mode. *)
 
 val is_xen: bool value
@@ -44,8 +44,8 @@ val unix: bool key
 val xen: bool key
 (** [--xen]. Set {!target} to [`Xen]. *)
 
-val qemu: bool key
-(** [--qemu]. Set {!target} to [`QEMU]. *)
+val virtio: bool key
+(** [--virtio]. Set {!target} to [`Virtio]. *)
 
 val ukvm: bool key
 (** [--ukvm]. Set {!target} to [`Ukvm]. *)

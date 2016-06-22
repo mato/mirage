@@ -43,9 +43,9 @@ let io_page_conf = object
   method name = "io_page"
   method module_name = "Io_page"
   method libraries =
-	Key.match_ Key.(value target) @@function
-	  | `Xen | `QEMU | `Ukvm -> ["io-page"]
-	  | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
+    Key.match_ Key.(value target) @@function
+    | `Xen | `Virtio | `Ukvm -> ["io-page"]
+    | `Unix | `MacOSX -> ["io-page"; "io-page.unix"]
   method packages = Key.pure [ "io-page" ]
 end
 
@@ -72,9 +72,9 @@ let clock_conf = object (self)
   method name = "clock"
   method module_name = "Clock"
   method libraries =
-	Key.match_ Key.(value target) @@function
-	  | `Xen | `QEMU | `Ukvm -> ["mirage-clock-xen"]
-	  | `Unix | `MacOSX -> ["mirage-clock-unix"]
+    Key.match_ Key.(value target) @@function
+    | `Xen | `Virtio | `Ukvm -> ["mirage-clock-xen"]
+    | `Unix | `MacOSX -> ["mirage-clock-unix"]
   method packages = self#libraries
 end
 
@@ -135,10 +135,10 @@ let console_solo5 str = impl @@ object
 
 let custom_console str =
   match_impl Key.(value target) [
-  `Xen, console_xen str ;
-  `QEMU,  console_solo5 str ;
-  `Ukvm,  console_solo5 str ;
-] ~default:(console_unix str)
+    `Xen, console_xen str;
+    `Virtio, console_solo5 str;
+    `Ukvm, console_solo5 str;
+  ] ~default:(console_unix str)
 
 let default_console = custom_console "0"
 
@@ -192,10 +192,10 @@ let direct_kv_ro_conf dirname = impl @@ object
 
 let direct_kv_ro dirname =
   match_impl Key.(value target) [
-  `Xen, crunch dirname ;
-  `QEMU,  crunch dirname ;
-  `Ukvm,  crunch dirname ;
-] ~default:(direct_kv_ro_conf dirname)
+    `Xen, crunch dirname;
+    `Virtio, crunch dirname;
+    `Ukvm, crunch dirname;
+  ] ~default:(direct_kv_ro_conf dirname)
 
 type block = BLOCK
 let block = Type BLOCK
@@ -227,19 +227,20 @@ class block_conf file =
     method name = name
     method module_name = "Block"
     method packages =
-	  Key.match_ Key.(value target) @@function
-		| `Xen -> ["mirage-block-xen"]
-		| `QEMU | `Ukvm -> ["mirage-block-solo5"]
-		| `Unix | `MacOSX -> ["mirage-block-unix"]
+      Key.match_ Key.(value target) @@function
+      | `Xen -> ["mirage-block-xen"]
+      | `Virtio | `Ukvm -> ["mirage-block-solo5"]
+      | `Unix | `MacOSX -> ["mirage-block-unix"]
     method libraries =
-	  Key.match_ Key.(value target) @@function
-		| `Xen -> ["mirage-block-xen.front"]
-		| `QEMU | `Ukvm -> ["mirage-block-solo5"]
-		| `Unix | `MacOSX -> ["mirage-block-unix"]
+      Key.match_ Key.(value target) @@function
+      | `Xen -> ["mirage-block-xen.front"]
+      | `Virtio | `Ukvm -> ["mirage-block-solo5"]
+      | `Unix | `MacOSX -> ["mirage-block-unix"]
 
     method private connect_name target root =
       match target with
-      | `Unix | `MacOSX | `QEMU | `Ukvm -> root / b.filename (* open the file directly *)
+      | `Unix | `MacOSX | `Virtio | `Ukvm ->
+        root / b.filename (* open the file directly *)
       | `Xen ->
         (* We need the xenstore id *)
         (* Taken from https://github.com/mirage/mirage-block-xen/blob/
@@ -383,10 +384,10 @@ let network_conf (intf : string Key.key) =
 
     method packages =
       Key.match_ Key.(value target) @@ function
-      | `Unix         -> ["mirage-net-unix"]
-      | `MacOSX       -> ["mirage-net-macosx"]
-      | `Xen          -> ["mirage-net-xen"]
-      | `QEMU | `Ukvm -> ["mirage-net-solo5"]
+      | `Unix           -> ["mirage-net-unix"]
+      | `MacOSX         -> ["mirage-net-macosx"]
+      | `Xen            -> ["mirage-net-xen"]
+      | `Virtio | `Ukvm -> ["mirage-net-solo5"]
 
     method libraries = self#packages
 
@@ -603,7 +604,8 @@ let udpv4_socket_conf ipv4_key = object
   method libraries =
     Key.match_ Key.(value target) @@ function
     | `Unix | `MacOSX -> [ "tcpip.udpv4-socket" ]
-    | `Xen | `QEMU | `Ukvm -> failwith "No socket implementation available for Xen"
+    | `Xen | `Virtio | `Ukvm ->
+      failwith "No socket implementation available for this target"
   method connect _ modname _ =
     Format.asprintf "%s.connect %a" modname  pp_key ipv4_key
 end
@@ -650,7 +652,8 @@ let tcpv4_socket_conf ipv4_key = object
   method libraries =
     Key.match_ Key.(value target) @@ function
     | `Unix | `MacOSX -> [ "tcpip.tcpv4-socket" ]
-    | `Xen | `QEMU | `Ukvm -> failwith "No socket implementation available for Xen"
+    | `Xen | `Virtio | `Ukvm ->
+      failwith "No socket implementation available for this target"
   method connect _ modname _ =
     Format.asprintf "%s.connect %a" modname  pp_key ipv4_key
 end
@@ -821,19 +824,20 @@ let nocrypto = impl @@ object
 
     method packages =
       Key.match_ Key.(value target) @@function
-        | `Xen | `QEMU | `Ukvm -> [ "nocrypto" ; "mirage-entropy-xen" ; "zarith-xen" ]
-		| `Unix | `MacOSX -> [ "nocrypto" ]
+      | `Xen | `Virtio | `Ukvm ->
+        ["nocrypto"; "mirage-entropy-xen"; "zarith-xen"]
+      | `Unix | `MacOSX -> ["nocrypto"]
 
     method libraries =
       Key.match_ Key.(value target) @@function
-        | `Xen | `QEMU | `Ukvm -> ["nocrypto.xen"]
-		| `Unix | `MacOSX -> ["nocrypto.lwt"]
+      | `Xen | `Virtio | `Ukvm -> ["nocrypto.xen"]
+      | `Unix | `MacOSX -> ["nocrypto.lwt"]
 
     method configure _ = R.ok (enable_entropy ())
     method connect i _ _ =
-	  let s = match Key.(get (Info.context i) target) with
-	  | `Xen | `QEMU | `Ukvm -> "Nocrypto_entropy_xen.initialize ()"
-	  | `Unix | `MacOSX -> "Nocrypto_entropy_lwt.initialize ()"
+      let s = match Key.(get (Info.context i) target) with
+        | `Xen | `Virtio | `Ukvm -> "Nocrypto_entropy_xen.initialize ()"
+        | `Unix | `MacOSX -> "Nocrypto_entropy_lwt.initialize ()"
       in
       Fmt.strf "%s >|= fun x -> `Ok x" s
 
@@ -912,7 +916,8 @@ let resolver_unix_system = impl @@ object
     method packages =
       Key.match_ Key.(value target) @@ function
       | `Unix | `MacOSX -> [ "mirage-conduit" ]
-      | `Xen | `QEMU | `Ukvm -> failwith "Resolver_unix not supported on Xen"
+      | `Xen | `Virtio | `Ukvm ->
+        failwith "Resolver_unix not supported on this target"
     method libraries = Key.pure [ "conduit.mirage"; "conduit.lwt-unix" ]
     method connect _ _modname _ = "return (`Ok Resolver_lwt_unix.system)"
   end
@@ -1001,13 +1006,13 @@ let no_argv = impl @@ object
 let argv_dynamic =
   match_impl Key.(value target) [
   `Xen, argv_xen ;  
-  `QEMU, argv_solo5 ;
+  `Virtio, argv_solo5 ;
   `Ukvm, argv_solo5 ;
 ] ~default:(argv_unix)
 
 let default_argv = match_impl Key.(value target) [
   `Xen, argv_xen ;
-  `QEMU, argv_solo5 ;
+  `Virtio, argv_solo5 ;
   `Ukvm, argv_solo5 ;
 ] ~default:(argv_unix)
 
@@ -1076,9 +1081,9 @@ let mprof_trace ~size () =
     method keys = [ Key.abstract key ]
     method packages = Key.pure ["mirage-profile"]
     method libraries =
-	  Key.match_ Key.(value target) @@function
-		| `Xen | `QEMU | `Ukvm -> ["mirage-profile.xen"]
-		| `Unix | `MacOSX -> ["mirage-profile.unix"]
+      Key.match_ Key.(value target) @@function
+      | `Xen | `Virtio | `Ukvm -> ["mirage-profile.xen"]
+      | `Unix | `MacOSX -> ["mirage-profile.unix"]
 
     method configure _ =
       if Sys.command "ocamlfind query lwt.tracing 2>/dev/null" = 0
@@ -1100,7 +1105,7 @@ let mprof_trace ~size () =
              MProf.Trace.Control.start trace_config@]"
           Key.serialize_call (Key.abstract key)
           unix_trace_file;
-      | `Xen | `QEMU | `Ukvm ->
+      | `Xen | `Virtio | `Ukvm ->
         Fmt.strf
           "return (`Ok ()))@.\
            let () = (@ \
@@ -1439,7 +1444,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
       append fmt "FLAGS  = -r -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append fmt "XENLIB = $(shell ocamlfind query mirage-xen)\n"
-    | `QEMU | `Ukvm ->
+    | `Virtio | `Ukvm ->
       append fmt "SYNTAX = -tags \"%s\"\n" default_tags;
       append fmt "FLAGS  = -cflag -g -lflags -g,-linkpkg,-dontlink,unix\n";
       append fmt "XENLIB = $(shell ocamlfind query mirage-solo5)\n"
@@ -1506,7 +1511,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "\t@@echo Build succeeded";
       R.ok ()
     (* TODO Solo5 targets do not currently support linking extra C archives *)
-    | `QEMU ->
+    | `Virtio ->
       append fmt "build:: main.native.o";
       let pkg_config_deps = "mirage-solo5 ocaml-freestanding" in
       append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
@@ -1621,7 +1626,7 @@ module Project = struct
         Key.(abstract target);
         Key.(abstract unix);
         Key.(abstract xen);
-		Key.(abstract qemu);
+        Key.(abstract virtio);
         Key.(abstract ukvm);
         Key.(abstract no_ocaml_check);
         Key.(abstract warn_error);
@@ -1629,18 +1634,18 @@ module Project = struct
 
       method packages =
         let l = [ "lwt"; "mirage-types"; "mirage-types-lwt" ] in
-		Key.match_ Key.(value target) @@function
-		  | `Xen -> "mirage-xen" :: l
-		  | `QEMU -> "solo5-kernel-virtio" :: "mirage-solo5" :: l
-		  | `Ukvm -> "solo5-kernel-ukvm" :: "mirage-solo5" :: l
-		  | `Unix | `MacOSX -> "mirage-unix" :: l
+          Key.match_ Key.(value target) @@function
+          | `Xen -> "mirage-xen" :: l
+          | `Virtio -> "solo5-kernel-virtio" :: "mirage-solo5" :: l
+          | `Ukvm -> "solo5-kernel-ukvm" :: "mirage-solo5" :: l
+          | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method libraries =
         let l = [ "mirage.runtime"; "mirage-types.lwt" ] in
-		Key.match_ Key.(value target) @@function
-		  | `Xen -> "mirage-xen" :: l
-		  | `QEMU | `Ukvm -> "mirage-solo5" :: l
-		  | `Unix | `MacOSX -> "mirage-unix" :: l
+          Key.match_ Key.(value target) @@function
+          | `Xen -> "mirage-xen" :: l
+          | `Virtio | `Ukvm -> "mirage-solo5" :: l
+          | `Unix | `MacOSX -> "mirage-unix" :: l
 
       method configure = configure
       method clean = clean
