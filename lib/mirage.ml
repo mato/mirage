@@ -126,9 +126,8 @@ let console_solo5 str = impl @@ object
     val name = Name.ocamlify @@ "console_solo5_" ^ str
     method name = name
     method module_name = "Console_solo5"
-    method packages = Key.pure
-        ["mirage-console"; "mirage-solo5";]
-    method libraries = Key.pure ["mirage-console.solo5"]
+    method packages = Key.pure ["mirage-console-solo5";]
+    method libraries = Key.pure ["mirage-console-solo5"]
     method connect _ modname _args =
       Printf.sprintf "%s.connect %S" modname str
   end
