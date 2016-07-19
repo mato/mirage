@@ -1360,47 +1360,26 @@ let rec expand_name ~lib param =
     | None              -> prefix ^ lib / name
     | Some (name, rest) -> prefix ^ lib / name / expand_name ~lib rest
 
-(*
- * TODO: Consolidate these two into a single function, and filter out
- * -L entries with no linked libraries.
- *)
-
 (* Get the linker flags for any extra C objects we depend on.
- * This is needed when building a Xen image as we do the link manually. *)
-let get_extra_ld_flags pkgs =
+ * This is needed when building a Xen/Solo5 image as we do the link manually. *)
+let get_extra_ld_flags target pkgs =
   Cmd.read "opam config var lib" >>= fun s ->
   let lib = String.trim s in
   Cmd.read
-    "ocamlfind query -r -format '%%d\t%%(xen_linkopts)' -predicates native %s"
-    (String.concat ~sep:" " pkgs) >>| fun output ->
+    "ocamlfind query -r -format '%%d\t%%(%s_linkopts)' -predicates native %s"
+    target (String.concat ~sep:" " pkgs) >>| fun output ->
   String.cuts output ~sep:"\n"
   |> List.fold_left (fun acc line ->
       match String.cut line ~sep:"\t" with
       | None -> acc
       | Some (dir, ldflags) ->
-        let ldflags = String.cuts ldflags ~sep:" " in
-        let ldflags = List.map (expand_name ~lib) ldflags in
-        let ldflags = String.concat ~sep:" " ldflags in
-        Printf.sprintf "-L%s %s" dir ldflags :: acc
-    ) []
-
-(* Get the linker flags for any extra C objects we depend on.
- * This is needed when building a Solo5 image as we do the link manually. *)
-let get_extra_ld_flags_solo5 pkgs =
-  Cmd.read "opam config var lib" >>= fun s ->
-  let lib = String.trim s in
-  Cmd.read
-    "ocamlfind query -r -format '%%d\t%%(freestanding_linkopts)' -predicates native %s"
-    (String.concat ~sep:" " pkgs) >>| fun output ->
-  String.cuts output ~sep:"\n"
-  |> List.fold_left (fun acc line ->
-      match String.cut line ~sep:"\t" with
-      | None -> acc
-      | Some (dir, ldflags) ->
-        let ldflags = String.cuts ldflags ~sep:" " in
-        let ldflags = List.map (expand_name ~lib) ldflags in
-        let ldflags = String.concat ~sep:" " ldflags in
-        Printf.sprintf "-L%s %s" dir ldflags :: acc
+        if ldflags <> "" then (
+          let ldflags = String.cuts ldflags ~sep:" " in
+          let ldflags = List.map (expand_name ~lib) ldflags in
+          let ldflags = String.concat ~sep:" " ldflags in
+          Printf.sprintf "-L%s %s" dir ldflags :: acc
+        )
+        else acc
     ) []
 
 let configure_myocamlbuild_ml ~root =
@@ -1522,7 +1501,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
 
   begin match target with
     | `Xen ->
-      get_extra_ld_flags libs
+      get_extra_ld_flags "xen" libs
       >>| String.concat ~sep:" \\\n\t  "
       >>= fun extra_c_archives ->
       append fmt "build:: main.native.o";
@@ -1538,7 +1517,7 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "\t@@echo Build succeeded";
       R.ok ()
     | `Virtio ->
-      get_extra_ld_flags_solo5 libs
+      get_extra_ld_flags "freestanding" libs
       >>| String.concat ~sep:" \\\n\t  "
       >>= fun extra_c_archives ->
       append fmt "build:: main.native.o";
@@ -1546,13 +1525,14 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
       append fmt "\tld $$(pkg-config --variable=ldflags solo5-kernel-virtio) \\\n\
                   \t  _build/main.native.o \\\n\
-                  \t  %s $$(pkg-config --static --libs %s)\\\n\
+                  \t  %s \\\n\
+                  \t  $$(pkg-config --static --libs %s) \\\n\
                   \t  -o mir-%s.virtio"
         extra_c_archives pkg_config_deps name ;
       append fmt "\t@@echo Build succeeded";
       R.ok ()
     | `Ukvm ->
-      get_extra_ld_flags_solo5 libs
+      get_extra_ld_flags "freestanding" libs
       >>| String.concat ~sep:" \\\n\t  "
       >>= fun extra_c_archives ->
       append fmt "build:: main.native.o";
@@ -1560,7 +1540,8 @@ let configure_makefile ~target ~root ~name ~warn_error info =
       append fmt "\tpkg-config --print-errors --exists %s" pkg_config_deps;
       append fmt "\tld $$(pkg-config --variable=ldflags solo5-kernel-ukvm) \\\n\
                   \t  _build/main.native.o \\\n\
-                  \t  %s $$(pkg-config --static --libs %s)\\\n\
+                  \t  %s \\\n\
+                  \t  $$(pkg-config --static --libs %s) \\\n\
                   \t  -o mir-%s.ukvm"
         extra_c_archives pkg_config_deps name ;
       append fmt "\t@@echo Build succeeded";
