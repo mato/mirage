@@ -20,7 +20,7 @@ let mprof_trace ~size () =
       | `Xen | `Qubes ->
         [ package ~max:"1.0.0" "mirage-profile";
           package ~max:"1.0.0" "mirage-profile-xen" ]
-      | `Virtio | `Hvt | `Muen | `Genode -> []
+      | `Virtio | `Hvt | `Muen | `Genode | `Spt -> []
       | `Unix | `MacOSX ->
         [ package ~max:"1.0.0" "mirage-profile";
           package ~max:"1.0.0" "mirage-profile-unix" ]
@@ -31,7 +31,7 @@ let mprof_trace ~size () =
                      opam pin add lwt https://github.com/mirage/lwt.git#tracing"
       | Ok _ -> Ok ()
     method! connect i _ _ = match get_target i with
-      | `Virtio | `Hvt | `Muen | `Genode ->
+      | `Virtio | `Hvt | `Muen | `Genode | `Spt ->
         failwith  "tracing is not currently implemented for solo5 targets"
       | `Unix | `MacOSX ->
         Fmt.strf

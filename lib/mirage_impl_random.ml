@@ -33,7 +33,7 @@ let nocrypto = impl @@ object
       | `Xen | `Qubes ->
         [ package ~min:"0.5.4" ~max:"0.6.0" ~sublibs:["mirage"] "nocrypto";
           package ~max:"2.0" ~ocamlfind:[] "zarith-xen" ]
-      | `Virtio | `Hvt | `Muen | `Genode ->
+      | `Virtio | `Hvt | `Muen | `Genode | `Spt ->
         [ package ~min:"0.5.4" ~max:"0.6.0" ~sublibs:["mirage"] "nocrypto";
           package ~max:"2.0" ~ocamlfind:[] "zarith-freestanding" ]
       | `Unix | `MacOSX ->
@@ -42,7 +42,7 @@ let nocrypto = impl @@ object
     method! build _ = Rresult.R.ok (enable_entropy ())
     method! connect i _ _ =
       match Mirage_impl_misc.get_target i with
-      | `Xen | `Qubes | `Virtio | `Hvt | `Muen | `Genode ->
+      | `Xen | `Qubes | `Virtio | `Hvt | `Muen | `Genode | `Spt ->
         "Nocrypto_entropy_mirage.initialize ()"
       | `Unix | `MacOSX -> "Nocrypto_entropy_lwt.initialize ()"
   end
