@@ -565,7 +565,7 @@ let unikernel_opam_name name target =
   let target_str = Fmt.strf "%a" Key.pp_target target in
   opam_name name target_str
 
-let generate_manifest =
+let generate_manifest () =
   (* This Log statement does not show with configure --verbose *)
   Log.info (fun m -> m "generating manifest");
   (* But this print_endline does *)
@@ -588,7 +588,7 @@ let generate_manifest =
       R.ok ())
     "Solo5 application manifest file"
 
-let generate_manifest_c =
+let generate_manifest_c () =
   let json = "manifest.json" in
   let c = "_build/manifest.c" in
   let cmd = Bos.Cmd.(v "solo5-mfttool" % "gen" % json % c)
@@ -598,8 +598,8 @@ let generate_manifest_c =
   Bos.OS.Cmd.run cmd
 
 let configure_manifest () =
-  generate_manifest >>= fun () ->
-  generate_manifest_c
+  generate_manifest () >>= fun () ->
+  generate_manifest_c ()
 
 let clean_manifest () =
   Bos.OS.File.delete Fpath.(v "manifest.json")
